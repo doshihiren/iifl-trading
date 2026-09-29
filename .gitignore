@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# IIFL authentication/session
+iifl_session.json
+*iifl_session*
+session*.json
+sessions/
+token*
+tokens/
+credentials*
+
+# Logs
+*.log
+logs/
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Runtime/data
+data/
+*.csv
+
+# Backups/temp files
+*.backup
+*.bak
+*.tmp
+
+# Editors/system
+.vscode/
+.idea/
+.DS_Store
