@@ -6,7 +6,10 @@ import requests
 from flask import Flask, request, redirect, jsonify
 from dotenv import load_dotenv
 
+from networking import force_ipv4
+
 load_dotenv("/root/iifl/.env")
+force_ipv4()
 
 from instruments import InstrumentLookupError, find_instrument
 from market_data import MarketDataError, historical_candles, market_quote
