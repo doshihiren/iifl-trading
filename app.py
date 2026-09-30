@@ -6,6 +6,9 @@ import requests
 from flask import Flask, request, redirect, jsonify
 from dotenv import load_dotenv
 
+from instruments import InstrumentLookupError, find_instrument
+from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
+
 load_dotenv("/root/iifl/.env")
 
 app = Flask(__name__)
@@ -259,6 +262,66 @@ def limits():
 
     except Exception as e:
 
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+@app.route("/iifl/instruments/<symbol>")
+def instrument_lookup(symbol):
+    try:
+        instrument = find_instrument(symbol, exchange=request.args.get("exchange", "NSEEQ"))
+        return jsonify({
+            "status": "Ok",
+            "message": "Success",
+            "result": instrument
+        })
+    except InstrumentLookupError as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 404
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 502
+
+
+@app.route("/iifl/orders/test/sbc", methods=["GET"])
+def sbc_test_order_preview():
+    return jsonify({
+        "status": "Ok",
+        "message": "Preview only. No order has been sent.",
+        "result": build_sbc_test_order()
+    })
+
+
+@app.route("/iifl/orders/test/sbc", methods=["POST"])
+def sbc_test_order_execute():
+    body = request.get_json(silent=True) or {}
+
+    if body.get("confirm") != "PLACE_SBC_1_SHARE":
+        return jsonify({
+            "status": "error",
+            "message": "Explicit confirmation required.",
+            "required_confirm": "PLACE_SBC_1_SHARE"
+        }), 400
+
+    try:
+        http_status, result = place_sbc_test_order()
+        return jsonify({
+            "status": "forwarded",
+            "iifl_http_status": http_status,
+            "iifl_response": result
+        }), http_status
+    except LiveTradingDisabled as e:
+        return jsonify({
+            "status": "blocked",
+            "message": str(e)
+        }), 403
+    except Exception as e:
         return jsonify({
             "status": "error",
             "message": str(e)
