@@ -6,10 +6,10 @@ import requests
 from flask import Flask, request, redirect, jsonify
 from dotenv import load_dotenv
 
+load_dotenv("/root/iifl/.env")
+
 from instruments import InstrumentLookupError, find_instrument
 from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
-
-load_dotenv("/root/iifl/.env")
 
 app = Flask(__name__)
 
