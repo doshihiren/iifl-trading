@@ -98,3 +98,19 @@ def historical_candles(
     }
 
     return _post("/v1/marketdata/historicaldata", payload)
+
+
+def extract_ltp(body):
+    """Return LTP from the confirmed IIFL market quote response."""
+    if not isinstance(body, dict):
+        raise MarketDataError("Unexpected market quote response")
+
+    result = body.get("result")
+    if not isinstance(result, list) or not result:
+        raise MarketDataError("Market quote result is empty")
+
+    item = result[0]
+    if not isinstance(item, dict) or item.get("ltp") is None:
+        raise MarketDataError("LTP is missing from market quote response")
+
+    return float(item["ltp"])
