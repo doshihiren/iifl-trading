@@ -14,6 +14,7 @@ force_ipv4()
 from instruments import InstrumentLookupError, find_instrument
 from market_data import MarketDataError, historical_candles, market_quote
 from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
+from bot_store import list_bots, upsert_bot, remove_bot, list_trades
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32).hex()
@@ -472,6 +473,114 @@ def sbc_test_order_execute():
             "status": "error",
             "message": str(e)
         }), 500
+
+
+@app.route("/iifl/api/bots", methods=["GET"])
+def api_bots_list():
+    return jsonify({
+        "status": "Ok",
+        "result": list_bots()
+    })
+
+
+@app.route("/iifl/api/bots", methods=["POST"])
+def api_bots_save():
+    body = request.get_json(silent=True) or {}
+
+    symbol = str(body.get("symbol", "")).strip().upper()
+    if not symbol:
+        return jsonify({"status": "error", "message": "symbol is required"}), 400
+
+    try:
+        instrument = find_instrument(symbol, exchange="NSEEQ")
+    except InstrumentLookupError as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+
+    try:
+        quantity = int(body.get("qty", 1))
+        target = float(body.get("target", 1.0))
+        maxpos = int(body.get("maxpos", 10))
+        capital = float(body.get("capital", 100000))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid numeric bot settings"}), 400
+
+    timeframe = str(body.get("timeframe", "15m")).lower()
+    if timeframe not in {"1m", "5m", "15m"}:
+        return jsonify({"status": "error", "message": "timeframe must be 1m, 5m or 15m"}), 400
+
+    mode = str(body.get("mode", "PAPER")).upper()
+    if mode not in {"PAPER", "LIVE"}:
+        return jsonify({"status": "error", "message": "mode must be PAPER or LIVE"}), 400
+
+    product = str(body.get("product", "DELIVERY")).upper()
+    if product not in {"DELIVERY", "INTRADAY"}:
+        return jsonify({"status": "error", "message": "Invalid product"}), 400
+
+    if quantity <= 0 or target <= 0 or maxpos <= 0 or capital <= 0:
+        return jsonify({"status": "error", "message": "Bot settings must be greater than zero"}), 400
+
+    saved = upsert_bot({
+        "symbol": symbol,
+        "tradingSymbol": instrument.get("tradingSymbol"),
+        "instrumentId": str(instrument.get("instrumentId")),
+        "exchange": instrument.get("exchange", "NSEEQ"),
+        "mode": mode,
+        "qty": quantity,
+        "target": target,
+        "timeframe": timeframe,
+        "product": product,
+        "maxpos": maxpos,
+        "capital": capital,
+        "status": "READY"
+    })
+
+    return jsonify({
+        "status": "Ok",
+        "message": "Bot saved",
+        "result": saved
+    })
+
+
+@app.route("/iifl/api/bots/<symbol>", methods=["DELETE"])
+def api_bots_delete(symbol):
+    removed = remove_bot(symbol)
+    return jsonify({
+        "status": "Ok",
+        "removed": removed
+    })
+
+
+@app.route("/iifl/api/reports/summary", methods=["GET"])
+def api_reports_summary():
+    trades = list_trades()
+    realized = 0.0
+    winning = 0
+    losing = 0
+    open_count = 0
+
+    for trade in trades:
+        status = str(trade.get("status", "")).upper()
+        pnl = float(trade.get("pnl", 0) or 0)
+        if status == "OPEN":
+            open_count += 1
+        else:
+            realized += pnl
+            if pnl > 0:
+                winning += 1
+            elif pnl < 0:
+                losing += 1
+
+    return jsonify({
+        "status": "Ok",
+        "result": {
+            "trade_count": len(trades),
+            "open_trades": open_count,
+            "realized_pnl": round(realized, 2),
+            "winning_trades": winning,
+            "losing_trades": losing,
+            "trades": trades[-100:]
+        }
+    })
 
 
 if __name__ == "__main__":
