@@ -1,5 +1,9 @@
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv(os.getenv("IIFL_ENV_FILE", "/root/iifl/.env"))
+
 
 def env_bool(name, default=False):
     value = os.getenv(name)
