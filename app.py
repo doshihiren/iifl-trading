@@ -3,7 +3,7 @@ import hashlib
 import json
 import requests
 
-from flask import Flask, request, redirect, jsonify, render_template
+from flask import Flask, request, redirect, jsonify, render_template, session, url_for
 from dotenv import load_dotenv
 
 from networking import force_ipv4
@@ -16,10 +16,76 @@ from market_data import MarketDataError, historical_candles, market_quote
 from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32).hex()
+
+DASHBOARD_USERNAME = os.getenv("DASHBOARD_USERNAME", "admin")
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD")
+
+
+def dashboard_authenticated():
+    return session.get("dashboard_authenticated") is True
+
+
+@app.before_request
+def protect_iifl_dashboard():
+    path = request.path
+
+    if not path.startswith("/iifl"):
+        return None
+
+    public_paths = {
+        "/iifl/auth/login",
+        "/iifl/callback",
+    }
+
+    if path in public_paths:
+        return None
+
+    if dashboard_authenticated():
+        return None
+
+    if path == "/iifl/" or path == "/iifl":
+        return redirect(url_for("dashboard_login"))
+
+    return jsonify({
+        "status": "error",
+        "message": "Dashboard login required"
+    }), 401
+
+
+@app.route("/iifl/auth/login", methods=["GET", "POST"])
+def dashboard_login():
+    if dashboard_authenticated():
+        return redirect("/iifl/")
+
+    error = None
+
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+
+        if not DASHBOARD_PASSWORD:
+            error = "Dashboard password is not configured on the server."
+        elif username == DASHBOARD_USERNAME and password == DASHBOARD_PASSWORD:
+            session.clear()
+            session["dashboard_authenticated"] = True
+            session.permanent = True
+            return redirect("/iifl/")
+        else:
+            error = "Invalid username or password."
+
+    return render_template("login.html", error=error)
+
+
+@app.route("/iifl/auth/logout", methods=["POST"])
+def dashboard_logout():
+    session.clear()
+    return redirect(url_for("dashboard_login"))
+
 
 @app.route("/iifl/")
 def dashboard():
-    return render_template("dashboard.html")
+    return render_template("dashboard.html", dashboard_username=DASHBOARD_USERNAME)
 
 
 API_KEY = os.getenv("IIFL_API_KEY")
