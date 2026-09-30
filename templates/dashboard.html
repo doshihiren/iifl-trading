@@ -58,7 +58,7 @@
       </div>
 
       <button class="start" style="width:100%" onclick="addBot()">Add Bot</button>
-      <div class="notice" style="margin-top:12px">UI preview is live. Symbol verification and LTP use your IIFL API. “Add Bot” currently adds the configuration to this dashboard only; it does not send a trade.</div>
+      <div class="notice" style="margin-top:12px">Bot configurations are now saved on the VPS and survive refresh/restart. Symbol verification and LTP use your IIFL API. Saving a bot does not itself send a trade.</div>
     </div>
 
     <div class="card">
@@ -76,6 +76,21 @@
         </table>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:18px">
+  <h2>Trading Reports</h2>
+  <div class="stats">
+    <div class="stat"><b id="tradeCount">0</b><span>Total trades</span></div>
+    <div class="stat"><b id="openTrades">0</b><span>Open trades</span></div>
+    <div class="stat"><b id="realizedPnl">₹0.00</b><span>Realized P&amp;L</span></div>
+  </div>
+  <div style="overflow:auto">
+    <table>
+      <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Status</th></tr></thead>
+      <tbody id="tradeRows"><tr><td colspan="7" class="empty">No trade history yet.</td></tr></tbody>
+    </table>
   </div>
 </div>
 
@@ -106,25 +121,59 @@ async function verifySymbol(){
   }catch(e){status.textContent=e.message || 'Verification failed.'}
 }
 
-function addBot(){
+async function loadBots(){
+  try{
+    const r=await fetch('/iifl/api/bots');
+    const data=await r.json();
+    bots=(data.result || []);
+    renderBots();
+  }catch(e){
+    document.getElementById('status').textContent='Could not load saved bots.';
+  }
+}
+
+async function addBot(){
   const status=document.getElementById('status');
   if(!verified){status.textContent='Verify a symbol first.';return}
+
   const bot={
     symbol:verified.symbol,
     mode:document.getElementById('mode').value,
-    qty:document.getElementById('qty').value,
-    target:document.getElementById('target').value,
+    qty:Number(document.getElementById('qty').value),
+    target:Number(document.getElementById('target').value),
     timeframe:document.getElementById('timeframe').value,
     product:document.getElementById('product').value,
-    maxpos:document.getElementById('maxpos').value,
-    capital:document.getElementById('capital').value
+    maxpos:Number(document.getElementById('maxpos').value),
+    capital:Number(document.getElementById('capital').value)
   };
-  bots = bots.filter(b=>b.symbol!==bot.symbol);
-  bots.push(bot); renderBots();
-  status.textContent=bot.symbol+' added to dashboard preview.';
+
+  status.textContent='Saving bot…';
+  try{
+    const r=await fetch('/iifl/api/bots',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(bot)
+    });
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.message || 'Could not save bot');
+    status.textContent=bot.symbol+' saved successfully.';
+    await loadBots();
+  }catch(e){
+    status.textContent=e.message || 'Could not save bot.';
+  }
 }
 
-function removeBot(symbol){bots=bots.filter(b=>b.symbol!==symbol);renderBots()}
+async function removeBot(symbol){
+  if(!confirm('Remove '+symbol+' bot configuration?')) return;
+  try{
+    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(symbol),{method:'DELETE'});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.message || 'Could not remove bot');
+    await loadBots();
+  }catch(e){
+    document.getElementById('status').textContent=e.message || 'Could not remove bot.';
+  }
+}
 
 function renderBots(){
   const tbody=document.getElementById('bots'); tbody.innerHTML='';
@@ -133,12 +182,46 @@ function renderBots(){
     const tr=document.createElement('tr');
     tr.innerHTML='<td><b>'+b.symbol+'</b><div class="meta">'+b.timeframe+' • '+b.product+'</div></td>'+
       '<td><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+b.mode+'</span></td>'+
-      '<td>'+b.qty+'</td><td>'+b.target+'%</td><td><span class="pill">READY</span></td>'+
+      '<td>'+b.qty+'</td><td>'+b.target+'%</td><td><span class="pill">'+(b.status || 'READY')+'</span></td>'+
       '<td><button class="danger" onclick="removeBot(\''+b.symbol+'\')">Remove</button></td>';
     tbody.appendChild(tr);
   });
   document.getElementById('botCount').textContent=bots.length;
 }
+
+async function loadReports(){
+  try{
+    const r=await fetch('/iifl/api/reports/summary');
+    const data=await r.json();
+    const s=data.result || {};
+    document.getElementById('tradeCount').textContent=s.trade_count || 0;
+    document.getElementById('openTrades').textContent=s.open_trades || 0;
+    document.getElementById('realizedPnl').textContent='₹'+Number(s.realized_pnl || 0).toFixed(2);
+
+    const tbody=document.getElementById('tradeRows');
+    const trades=s.trades || [];
+    tbody.innerHTML='';
+    if(!trades.length){
+      tbody.innerHTML='<tr><td colspan="7" class="empty">No trade history yet.</td></tr>';
+      return;
+    }
+    trades.slice().reverse().forEach(t=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML='<td>'+String(t.symbol || '-')+'</td>'+
+        '<td>'+String(t.side || '-')+'</td>'+
+        '<td>'+String(t.quantity || t.qty || '-')+'</td>'+
+        '<td>'+String(t.entry_price ?? '-')+'</td>'+
+        '<td>'+String(t.exit_price ?? '-')+'</td>'+
+        '<td>'+String(t.pnl ?? '-')+'</td>'+
+        '<td>'+String(t.status || '-')+'</td>';
+      tbody.appendChild(tr);
+    });
+  }catch(e){}
+}
+
+loadBots();
+loadReports();
+setInterval(loadReports, 15000);
 </script>
 </body>
 </html>
