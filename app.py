@@ -3,7 +3,7 @@ import hashlib
 import json
 import requests
 
-from flask import Flask, request, redirect, jsonify
+from flask import Flask, request, redirect, jsonify, render_template
 from dotenv import load_dotenv
 
 from networking import force_ipv4
@@ -16,6 +16,11 @@ from market_data import MarketDataError, historical_candles, market_quote
 from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
 
 app = Flask(__name__)
+
+@app.route("/iifl/")
+def dashboard():
+    return render_template("dashboard.html")
+
 
 API_KEY = os.getenv("IIFL_API_KEY")
 API_SECRET = os.getenv("IIFL_API_SECRET")
