@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv("/root/iifl/.env")
 
 from instruments import InstrumentLookupError, find_instrument
+from market_data import MarketDataError, historical_candles, market_quote
 from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
 
 app = Flask(__name__)
@@ -287,6 +288,77 @@ def instrument_lookup(symbol):
             "status": "error",
             "message": str(e)
         }), 502
+
+
+@app.route("/iifl/market/quote")
+def market_quote_route():
+    symbol = request.args.get("symbol", "SBC")
+    exchange = request.args.get("exchange", "NSEEQ")
+
+    try:
+        instrument = find_instrument(symbol, exchange=exchange)
+        http_status, result = market_quote(
+            instrument_id=instrument["instrumentId"],
+            exchange=exchange,
+        )
+        return jsonify({
+            "status": "forwarded",
+            "symbol": symbol.upper(),
+            "instrument": {
+                "instrumentId": instrument.get("instrumentId"),
+                "tradingSymbol": instrument.get("tradingSymbol"),
+                "exchange": instrument.get("exchange"),
+            },
+            "iifl_http_status": http_status,
+            "iifl_response": result,
+        }), http_status
+    except InstrumentLookupError as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/iifl/market/candles")
+def market_candles_route():
+    symbol = request.args.get("symbol", "SBC")
+    exchange = request.args.get("exchange", "NSEEQ")
+    timeframe = request.args.get("timeframe", "1m")
+    from_date = request.args.get("from")
+    to_date = request.args.get("to")
+
+    if not from_date or not to_date:
+        return jsonify({
+            "status": "error",
+            "message": "Both from and to are required in DD-Mon-YYYY format."
+        }), 400
+
+    try:
+        instrument = find_instrument(symbol, exchange=exchange)
+        http_status, result = historical_candles(
+            instrument_id=instrument["instrumentId"],
+            exchange=exchange,
+            timeframe=timeframe,
+            from_date=from_date,
+            to_date=to_date,
+        )
+        return jsonify({
+            "status": "forwarded",
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "instrument": {
+                "instrumentId": instrument.get("instrumentId"),
+                "tradingSymbol": instrument.get("tradingSymbol"),
+                "exchange": instrument.get("exchange"),
+            },
+            "iifl_http_status": http_status,
+            "iifl_response": result,
+        }), http_status
+    except InstrumentLookupError as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+    except MarketDataError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/iifl/orders/test/sbc", methods=["GET"])
