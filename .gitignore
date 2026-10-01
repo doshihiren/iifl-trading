@@ -36,3 +36,10 @@ data/
 .vscode/
 .idea/
 .DS_Store
+
+# Runtime database and generated secrets
+*.db
+*.db-wal
+*.db-shm
+flask_secret
+worker.lock
