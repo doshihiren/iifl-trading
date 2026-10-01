@@ -7,10 +7,16 @@
   <style>
     :root{--bg:#0b1020;--panel:#121a2e;--panel2:#18223a;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--green:#32d583;--red:#ff6b6b;--blue:#6ea8fe;--amber:#f5b942}
     *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#08101f,#0f1730);font-family:Inter,system-ui,Arial,sans-serif;color:var(--text)}
-    .wrap{max-width:1180px;margin:auto;padding:28px 18px 50px}.top{display:flex;gap:18px;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap}
+    .wrap{max-width:1400px;margin:auto;padding:28px 18px 50px}.top{display:flex;gap:18px;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap}
     .brand h1{font-size:26px;margin:0 0 6px}.brand p{margin:0;color:var(--muted)}
     .badge{padding:8px 12px;border-radius:999px;background:#123523;color:#8af0b6;font-weight:700;font-size:13px}
-    .grid{display:grid;grid-template-columns:1.05fr .95fr;gap:18px}.card{background:rgba(18,26,46,.95);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.22)}
+    .badge.bad{background:#43232a;color:#ffc5ca}.badge.warn{background:#3d3115;color:#ffd98a}.badge.info{background:#1b2a4a;color:#b9d2ff}
+    .badges{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.badges a{color:inherit}
+    .btn-sm{padding:7px 10px;font-size:12px;border-radius:9px;margin:2px 0}
+    .err{color:#ff9da4}.pos{color:var(--green)}.neg{color:var(--red)}
+    .events{max-height:320px;overflow:auto;font-size:12px}.events div{padding:6px 0;border-bottom:1px solid var(--line)}
+    .events .ERROR{color:#ff9da4}.events .WARNING{color:#ffd98a}
+    .grid{display:grid;grid-template-columns:400px 1fr;gap:18px}.grid>*{min-width:0}.card{background:rgba(18,26,46,.95);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.22)}
     h2{font-size:18px;margin:0 0 16px}.row{display:grid;grid-template-columns:1fr auto;gap:10px}.field{margin-bottom:14px}.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}
     input,select{width:100%;background:#0d1528;color:var(--text);border:1px solid #30405f;border-radius:11px;padding:12px 13px;font-size:14px;outline:none}
     input:focus,select:focus{border-color:var(--blue)}button{border:0;border-radius:11px;padding:12px 16px;font-weight:800;cursor:pointer}
@@ -29,7 +35,13 @@
 <div class="wrap">
   <div class="top">
     <div class="brand"><h1>IIFL Trading Dashboard</h1><p>Multi-symbol bot control • NSE Equity</p></div>
-    <div class="badge">API CONNECTED</div>
+    <div class="badges">
+      <span id="sessionBadge" class="badge warn">SESSION …</span>
+      <a id="loginLink" class="badge info" href="/iifl/login" style="display:none;text-decoration:none">Login to IIFL</a>
+      <span id="workerBadge" class="badge warn">WORKER …</span>
+      <span id="marketBadge" class="badge info">MARKET …</span>
+      <span id="liveBadge" class="badge warn">LIVE …</span>
+    </div>
   </div>
 
   <div class="grid">
@@ -58,29 +70,29 @@
       </div>
 
       <button class="start" style="width:100%" onclick="addBot()">Add Bot</button>
-      <div class="notice" style="margin-top:12px">Bot configurations are now saved on the VPS and survive refresh/restart. Symbol verification and LTP use your IIFL API. Saving a bot does not itself send a trade.</div>
+      <div class="notice" style="margin-top:12px">Saving a bot does not send a trade. Start begins automatic trading. <b>Stop</b> blocks new BUYs but keeps selling open positions at their targets. <b>Exit &amp; Stop</b> sells this bot's open positions at market, then stops.</div>
     </div>
 
     <div class="card">
       <h2>System Overview</h2>
       <div class="stats">
         <div class="stat"><b id="botCount">0</b><span>Configured bots</span></div>
-        <div class="stat"><b>15m</b><span>Default interval</span></div>
-        <div class="stat"><b>1.0%</b><span>Default target</span></div>
+        <div class="stat"><b id="liveDeployed">₹0</b><span>LIVE deployed</span></div>
+        <div class="stat"><b id="paperDeployed">₹0</b><span>PAPER deployed</span></div>
       </div>
       <h2 style="margin-top:8px">Active Bots</h2>
       <div style="overflow:auto">
         <table>
-          <thead><tr><th>Symbol</th><th>Mode</th><th>Qty</th><th>Target</th><th>Status</th><th>Last Tick</th><th></th></tr></thead>
-          <tbody id="bots"><tr id="emptyRow"><td colspan="6" class="empty">No bots added yet.</td></tr></tbody>
+          <thead><tr><th>Bot</th><th>Mode</th><th>Qty / Target</th><th>Status</th><th>Open</th><th>Deployed</th><th>LTP</th><th>Last order</th><th></th></tr></thead>
+          <tbody id="bots"><tr id="emptyRow"><td colspan="9" class="empty">No bots added yet.</td></tr></tbody>
         </table>
       </div>
     </div>
   </div>
-</div>
 
 <div class="card" style="margin-top:18px">
-  <h2>Trading Reports</h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h2>Trading Reports</h2>
+    <select id="reportMode" style="width:auto" onchange="loadReports()"><option value="">All modes</option><option>LIVE</option><option>PAPER</option></select></div>
   <div class="stats">
     <div class="stat"><b id="tradeCount">0</b><span>Total trades</span></div>
     <div class="stat"><b id="openTrades">0</b><span>Open trades</span></div>
@@ -88,10 +100,28 @@
   </div>
   <div style="overflow:auto">
     <table>
-      <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Status</th></tr></thead>
-      <tbody id="tradeRows"><tr><td colspan="7" class="empty">No trade history yet.</td></tr></tbody>
+      <thead><tr><th>Bot / Symbol</th><th>Mode</th><th>Entry time</th><th>Entry fill</th><th>Qty</th><th>Target</th><th>Exit time</th><th>Exit fill</th><th>Gross P&amp;L</th><th>Fees</th><th>Net P&amp;L</th><th>Broker buy / sell</th><th>Status</th></tr></thead>
+      <tbody id="tradeRows"><tr><td colspan="13" class="empty">No trade history yet.</td></tr></tbody>
     </table>
   </div>
+</div>
+
+<div class="grid" style="margin-top:18px;grid-template-columns:1fr 1fr">
+  <div class="card">
+    <h2>LIVE Orders (broker)</h2>
+    <div style="overflow:auto;max-height:340px">
+      <table>
+        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>State</th><th>Fill</th><th>Broker ID</th></tr></thead>
+        <tbody id="orderRows"><tr><td colspan="7" class="empty">No LIVE orders yet.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Activity &amp; Reconciliation</h2>
+    <div id="recon" class="meta" style="margin-bottom:10px"></div>
+    <div id="events" class="events"><div class="meta">No events yet.</div></div>
+  </div>
+</div>
 </div>
 
 <script>
@@ -198,63 +228,146 @@ async function stopBot(botId){
   }
 }
 
+function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function money(v){return v===null||v===undefined||v===''?'-':'₹'+Number(v).toFixed(2)}
+function px(v){return v===null||v===undefined||v===''?'-':Number(v).toFixed(2)}
+function tm(v){if(!v) return '-'; const d=new Date(v); return isNaN(d)?esc(v):d.toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+function pnlCls(v){return v>0?'pos':(v<0?'neg':'')}
+
+async function exitBot(botId, symbol){
+  if(!confirm('Sell ALL open positions of this '+symbol+' bot at MARKET price now, then stop it?')) return;
+  try{
+    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(botId)+'/exit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'EXIT'})});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.message || 'Could not exit bot');
+    await loadBots();
+  }catch(e){document.getElementById('status').textContent=e.message || 'Could not exit bot.'}
+}
+
 function renderBots(){
   const tbody=document.getElementById('bots'); tbody.innerHTML='';
-  if(!bots.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No bots added yet.</td></tr>'}
+  if(!bots.length){tbody.innerHTML='<tr><td colspan="9" class="empty">No bots added yet.</td></tr>'}
+  let live=0, paper=0;
   bots.forEach(b=>{
+    if(b.mode==='LIVE') live+=Number(b.deployed_capital||0); else paper+=Number(b.deployed_capital||0);
     const tr=document.createElement('tr');
-    const running=(b.status==='RUNNING' || b.status==='ACTION_REQUIRED');
-    const actionBtn = running
-      ? '<button class="secondary" onclick="stopBot(\''+b.bot_id+'\')">Stop</button>'
-      : '<button class="start" onclick="startBot(\''+b.bot_id+'\')">Start</button>';
-    const pending = b.pending_order
-      ? '<div class="meta">'+String(b.pending_order.side)+' pending • '+String(b.pending_order.quantity)+' qty</div>'
-      : '';
-    const err = b.last_error ? '<div class="meta" style="color:#ff9da4">'+String(b.last_error)+'</div>' : '';
-    tr.innerHTML='<td><b>'+b.symbol+'</b><div class="meta">'+b.timeframe+' • '+b.product+' • '+String(b.bot_id || '')+'</div></td>'+
-      '<td><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+b.mode+'</span></td>'+
-      '<td>'+b.qty+'</td><td>'+b.target+'%</td><td><span class="pill">'+(b.status || 'READY')+'</span>'+pending+err+'</td>'+
-      '<td><span class="meta">'+(b.last_tick || '-')+'</span></td>'+
-      '<td>'+actionBtn+' <button class="danger" onclick="removeBot(\''+b.bot_id+'\',\''+b.symbol+'\')">Remove</button></td>';
+    const id=esc(b.bot_id), sym=esc(b.symbol);
+    let btns='';
+    if(b.status==='RUNNING'){
+      btns+='<button class="secondary btn-sm" onclick="stopBot(\''+id+'\')">Stop New Entries</button> ';
+    }else if(b.status!=='EXITING'){
+      btns+='<button class="start btn-sm" onclick="startBot(\''+id+'\')">Start</button> ';
+    }
+    if(b.open_positions>0 && b.status!=='EXITING'){
+      btns+='<button class="danger btn-sm" onclick="exitBot(\''+id+'\',\''+sym+'\')">Exit &amp; Stop</button> ';
+    }
+    btns+='<button class="danger btn-sm" onclick="removeBot(\''+id+'\',\''+sym+'\')">Remove</button>';
+    const statusLabel = b.status==='STOPPED' && b.open_positions>0 ? 'STOPPED (managing exits)' : b.status;
+    const err = b.last_error ? '<div class="meta err">'+esc(b.last_error)+'</div>' : '';
+    const pend = b.pending_orders ? '<div class="meta">'+b.pending_orders+' order(s) pending at broker</div>' : '';
+    tr.innerHTML='<td><b>'+sym+'</b><div class="meta">'+esc(b.timeframe)+' • '+esc(b.product)+' • '+id+'</div></td>'+
+      '<td><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+esc(b.mode)+'</span></td>'+
+      '<td>'+esc(b.qty)+' / '+esc(b.target)+'%<div class="meta">max '+esc(b.maxpos)+' • cap ₹'+Number(b.capital).toLocaleString('en-IN')+'</div></td>'+
+      '<td><span class="pill">'+esc(statusLabel || 'READY')+'</span>'+pend+err+'</td>'+
+      '<td>'+esc(b.open_positions)+'<div class="meta">'+esc(b.open_qty)+' sh</div></td>'+
+      '<td>'+money(b.deployed_capital)+'</td>'+
+      '<td>'+px(b.last_ltp)+'<div class="meta">'+tm(b.last_tick)+'</div></td>'+
+      '<td style="min-width:170px"><span class="meta">'+esc(b.last_order || '-')+'</span></td>'+
+      '<td style="white-space:nowrap">'+btns+'</td>';
     tbody.appendChild(tr);
   });
   document.getElementById('botCount').textContent=bots.length;
+  document.getElementById('liveDeployed').textContent='₹'+live.toLocaleString('en-IN',{maximumFractionDigits:0});
+  document.getElementById('paperDeployed').textContent='₹'+paper.toLocaleString('en-IN',{maximumFractionDigits:0});
 }
 
 async function loadReports(){
   try{
-    const r=await fetch('/iifl/api/reports/summary');
+    const mode=document.getElementById('reportMode').value;
+    const r=await fetch('/iifl/api/reports/summary'+(mode?'?mode='+mode:''));
     const data=await r.json();
     const s=data.result || {};
     document.getElementById('tradeCount').textContent=s.trade_count || 0;
     document.getElementById('openTrades').textContent=s.open_trades || 0;
-    document.getElementById('realizedPnl').textContent='₹'+Number(s.realized_pnl || 0).toFixed(2);
+    const rp=document.getElementById('realizedPnl');
+    rp.textContent='₹'+Number(s.realized_pnl || 0).toFixed(2); rp.className=pnlCls(s.realized_pnl);
 
     const tbody=document.getElementById('tradeRows');
     const trades=s.trades || [];
     tbody.innerHTML='';
     if(!trades.length){
-      tbody.innerHTML='<tr><td colspan="7" class="empty">No trade history yet.</td></tr>';
+      tbody.innerHTML='<tr><td colspan="13" class="empty">No trade history yet.</td></tr>';
       return;
     }
     trades.slice().reverse().forEach(t=>{
       const tr=document.createElement('tr');
-      tr.innerHTML='<td>'+String(t.symbol || '-')+'<div class="meta">'+String(t.bot_id || '')+'</div></td>'+
-        '<td>'+String(t.side || '-')+'</td>'+
-        '<td>'+String(t.quantity || t.qty || '-')+'</td>'+
-        '<td>'+String(t.entry_price ?? '-')+'</td>'+
-        '<td>'+String(t.exit_price ?? '-')+'</td>'+
-        '<td>'+String(t.pnl ?? '-')+'</td>'+
-        '<td>'+String(t.status || '-')+'</td>';
+      const closed=t.status==='CLOSED';
+      tr.innerHTML='<td>'+esc(t.symbol)+'<div class="meta">'+esc(t.bot_id || '')+'</div></td>'+
+        '<td><span class="pill '+(t.mode==='PAPER'?'paper':'')+'">'+esc(t.mode)+'</span></td>'+
+        '<td>'+tm(t.created_at)+'</td>'+
+        '<td>'+px(t.entry_price)+'</td>'+
+        '<td>'+esc(t.quantity)+'</td>'+
+        '<td>'+px(t.target_price)+'</td>'+
+        '<td>'+(closed?tm(t.closed_at):'-')+'</td>'+
+        '<td>'+(closed?px(t.exit_price):'-')+'</td>'+
+        '<td class="'+pnlCls(t.pnl)+'">'+(closed?money(t.pnl):'-')+'</td>'+
+        '<td>'+(t.fees==null?'-':money(t.fees))+'</td>'+
+        '<td>'+(t.net_pnl==null?'-':money(t.net_pnl))+'</td>'+
+        '<td><span class="meta">'+esc(t.broker_buy_order_id || '-')+' / '+esc(t.broker_sell_order_id || '-')+'</span></td>'+
+        '<td>'+esc(t.status)+(t.exit_reason&&closed?'<div class="meta">'+esc(t.exit_reason)+'</div>':'')+'</td>';
       tbody.appendChild(tr);
     });
   }catch(e){}
 }
 
+function setBadge(id, text, cls){const el=document.getElementById(id); el.textContent=text; el.className='badge '+cls;}
+
+async function loadSystem(){
+  try{
+    const r=await fetch('/iifl/api/system');
+    if(r.status===401){location.href='/iifl/auth/login';return}
+    const s=(await r.json()).result || {};
+    const sess=s.broker_session;
+    setBadge('sessionBadge', 'IIFL: '+sess, sess==='CONNECTED'?'':(sess==='UNVERIFIED'?'warn':'bad'));
+    document.getElementById('loginLink').style.display = sess==='CONNECTED' ? 'none' : '';
+    setBadge('workerBadge', 'WORKER '+s.worker, s.worker==='RUNNING'?'':'bad');
+    setBadge('marketBadge', 'MARKET '+String(s.market||'').replace('_',' '), s.market==='OPEN'?'':'info');
+    const liveOn = s.live_trading && s.ip_authorized;
+    setBadge('liveBadge', liveOn ? 'LIVE ON • max qty '+s.live_max_qty : 'LIVE OFF (.env)', liveOn?'':'warn');
+
+    const rec=s.reconciliation;
+    const recon=document.getElementById('recon');
+    if(rec && rec.rows && rec.rows.length){
+      recon.innerHTML='<b>Broker vs bots</b> ('+tm(rec.at)+'): '+rec.rows.map(x=>
+        '<span class="'+(x.mismatch?'err':'')+'">'+esc(x.symbol)+' '+esc(x.product)+' broker '+x.broker_qty+' / bots '+x.bot_qty+'</span>').join(' • ');
+    }else{recon.textContent='No LIVE positions to reconcile.'}
+
+    const ev=document.getElementById('events');
+    const list=s.events||[];
+    ev.innerHTML = list.length ? list.map(e=>'<div class="'+esc(e.level)+'"><span class="meta">'+tm(e.ts)+'</span> <b>'+esc(e.kind)+'</b> '+esc(e.message)+'</div>').join('') : '<div class="meta">No events yet.</div>';
+  }catch(e){setBadge('workerBadge','DASHBOARD OFFLINE','bad')}
+}
+
+async function loadOrders(){
+  try{
+    const r=await fetch('/iifl/api/orders');
+    const rows=(await r.json()).result || [];
+    const tbody=document.getElementById('orderRows');
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No LIVE orders yet.</td></tr>';return}
+    tbody.innerHTML=rows.map(o=>'<tr><td>'+tm(o.created_at)+'</td><td>'+esc(o.symbol)+'<div class="meta">'+esc(o.bot_id)+'</div></td><td>'+esc(o.side)+'</td><td>'+esc(o.filled_qty)+'/'+esc(o.qty)+'</td>'+
+      '<td><span class="pill">'+esc(o.state)+'</span>'+(o.reject_reason?'<div class="meta err">'+esc(o.reject_reason)+'</div>':'')+'</td>'+
+      '<td>'+px(o.avg_price)+'</td><td><span class="meta">'+esc(o.broker_order_id || '-')+'</span></td></tr>').join('');
+  }catch(e){}
+}
+
+loadSystem();
 loadBots();
 loadReports();
-setInterval(loadReports, 15000);
+loadOrders();
+setInterval(loadSystem, 5000);
 setInterval(loadBots, 5000);
+setInterval(loadOrders, 5000);
+setInterval(loadReports, 15000);
 </script>
 </body>
 </html>

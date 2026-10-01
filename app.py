@@ -14,10 +14,39 @@ force_ipv6()
 from instruments import InstrumentLookupError, find_instrument
 from market_data import MarketDataError, historical_candles, market_quote
 from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
-from bot_store import add_bot, list_bots, remove_bot, list_trades, update_bot
+from bot_store import add_bot, get_bot, list_bots, remove_bot, list_trades, update_bot
+import config
+import db
+import market_calendar
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
+
+db.init_db()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32).hex()
+
+
+def _load_secret_key():
+    key = os.getenv("FLASK_SECRET_KEY")
+    if key:
+        return key
+    # Persist a generated key so logins survive restarts and Gunicorn workers agree.
+    path = os.path.join(config.DATA_DIR, "flask_secret")
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        key = os.urandom(32).hex()
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        with open(path, "w") as f:
+            f.write(key)
+        os.chmod(path, 0o600)
+        return key
+
+
+app.secret_key = _load_secret_key()
 
 DASHBOARD_USERNAME = os.getenv("DASHBOARD_USERNAME", "admin")
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD")
@@ -226,6 +255,12 @@ def callback():
             "client_id": callback_client_id,
             "user_session": user_session
         })
+        db.set_runtime("broker_session", {
+            "state": "CONNECTED",
+            "detail": "new login",
+            "checked_at": db.now_utc(),
+        })
+        db.add_event("BROKER_LOGIN", "New IIFL session saved from dashboard login")
 
         return """
         <html>
@@ -383,6 +418,7 @@ def market_quote_route():
                 "instrumentId": instrument.get("instrumentId"),
                 "tradingSymbol": instrument.get("tradingSymbol"),
                 "exchange": instrument.get("exchange"),
+                "tickSize": _tick_size(instrument),
             },
             "iifl_http_status": http_status,
             "iifl_response": result,
@@ -475,11 +511,40 @@ def sbc_test_order_execute():
         }), 500
 
 
+def _tick_size(instrument):
+    for key in ("tickSize", "tick_size", "ticksize"):
+        value = instrument.get(key)
+        try:
+            if value not in (None, "") and float(value) > 0:
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.05
+
+
+ACTIVE_ORDER_STATES = ("SUBMITTING", "SUBMITTED", "PARTIALLY_FILLED", "UNKNOWN")
+
+
+def _bot_summary(bot):
+    lots = db.rows(
+        "SELECT quantity, entry_price FROM trades WHERE bot_id=? AND status IN ('OPEN','EXIT_SUBMITTED')",
+        (bot["bot_id"],))
+    pending = db.scalar(
+        "SELECT COUNT(*) FROM orders WHERE bot_id=? AND state IN (?,?,?,?)",
+        (bot["bot_id"], *ACTIVE_ORDER_STATES))
+    bot = dict(bot)
+    bot["open_positions"] = len(lots)
+    bot["open_qty"] = sum(int(l["quantity"]) for l in lots)
+    bot["deployed_capital"] = round(sum(float(l["entry_price"]) * int(l["quantity"]) for l in lots), 2)
+    bot["pending_orders"] = int(pending or 0)
+    return bot
+
+
 @app.route("/iifl/api/bots", methods=["GET"])
 def api_bots_list():
     return jsonify({
         "status": "Ok",
-        "result": list_bots()
+        "result": [_bot_summary(b) for b in list_bots()]
     })
 
 
@@ -519,11 +584,19 @@ def api_bots_save():
     if quantity <= 0 or target <= 0 or maxpos <= 0 or capital <= 0:
         return jsonify({"status": "error", "message": "Bot settings must be greater than zero"}), 400
 
+    if mode == "LIVE" and quantity > config.LIVE_MAX_QTY_PER_ORDER:
+        return jsonify({
+            "status": "error",
+            "message": f"LIVE qty is limited to {config.LIVE_MAX_QTY_PER_ORDER} per order "
+                       f"(LIVE_MAX_QTY_PER_ORDER in .env)"
+        }), 400
+
     saved = add_bot({
         "symbol": symbol,
         "tradingSymbol": instrument.get("tradingSymbol"),
         "instrumentId": str(instrument.get("instrumentId")),
         "exchange": instrument.get("exchange", "NSEEQ"),
+        "tick_size": _tick_size(instrument),
         "mode": mode,
         "qty": quantity,
         "target": target,
@@ -533,6 +606,8 @@ def api_bots_save():
         "capital": capital,
         "status": "READY"
     })
+    db.add_event("BOT_ADDED", f"{mode} bot {symbol} {timeframe} qty {quantity} target {target}%",
+                 bot_id=saved["bot_id"])
 
     return jsonify({
         "status": "Ok",
@@ -543,7 +618,18 @@ def api_bots_save():
 
 @app.route("/iifl/api/bots/<bot_id>", methods=["DELETE"])
 def api_bots_delete(bot_id):
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({"status": "error", "message": "Bot not found"}), 404
+    summary = _bot_summary(bot)
+    if bot["mode"] == "LIVE" and (summary["open_positions"] or summary["pending_orders"]):
+        return jsonify({
+            "status": "error",
+            "message": "This LIVE bot still has open positions or pending orders. "
+                       "Use 'Exit & Stop' first, then remove it."
+        }), 409
     removed = remove_bot(bot_id)
+    db.add_event("BOT_REMOVED", f"Bot {bot['symbol']} removed", bot_id=bot_id)
     return jsonify({
         "status": "Ok",
         "removed": removed
@@ -552,49 +638,119 @@ def api_bots_delete(bot_id):
 
 @app.route("/iifl/api/bots/<bot_id>/start", methods=["POST"])
 def api_bot_start(bot_id):
-    bot = update_bot(bot_id, status="RUNNING", last_error=None, pending_order=None)
+    bot = update_bot(bot_id, status="RUNNING", last_error=None)
     if not bot:
         return jsonify({"status": "error", "message": "Bot not found"}), 404
+    db.add_event("BOT_START", f"{bot['mode']} bot {bot['symbol']} started", bot_id=bot_id)
     return jsonify({"status": "Ok", "result": bot})
 
 
 @app.route("/iifl/api/bots/<bot_id>/stop", methods=["POST"])
 def api_bot_stop(bot_id):
+    """STOP_NEW_ENTRIES: no new BUYs; open positions keep being sold at target."""
     bot = update_bot(bot_id, status="STOPPED")
     if not bot:
         return jsonify({"status": "error", "message": "Bot not found"}), 404
+    db.add_event("BOT_STOP", f"{bot['symbol']} stopped new entries; exits still managed", bot_id=bot_id)
     return jsonify({"status": "Ok", "result": bot})
+
+
+@app.route("/iifl/api/bots/<bot_id>/exit", methods=["POST"])
+def api_bot_exit(bot_id):
+    """EXIT_AND_STOP: sell every open position of this bot at market, then stop."""
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") != "EXIT":
+        return jsonify({"status": "error", "message": "Confirmation required", "required_confirm": "EXIT"}), 400
+    bot = update_bot(bot_id, status="EXITING")
+    if not bot:
+        return jsonify({"status": "error", "message": "Bot not found"}), 404
+    db.add_event("BOT_EXIT", f"{bot['symbol']} exit-and-stop requested", level="WARNING", bot_id=bot_id)
+    return jsonify({"status": "Ok", "result": bot})
+
+
+def _age_seconds(iso_value):
+    if not iso_value:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds()
+    except ValueError:
+        return None
+
+
+@app.route("/iifl/api/system", methods=["GET"])
+def api_system():
+    now = datetime.now(IST)
+    session_file = load_session()
+    session_state = db.get_runtime("broker_session") or {}
+    if not session_file or not session_file.get("user_session"):
+        badge = "RECONNECT REQUIRED"
+    elif session_state.get("state") == "EXPIRED":
+        badge = "SESSION EXPIRED"
+    elif session_state.get("state") == "CONNECTED":
+        badge = "CONNECTED"
+    else:
+        badge = "UNVERIFIED"
+
+    heartbeat = db.get_runtime("worker_heartbeat") or {}
+    hb_age = _age_seconds(heartbeat.get("at"))
+    worker = "RUNNING" if hb_age is not None and hb_age <= config.WORKER_STALE_SECONDS else "NOT RUNNING"
+
+    events = db.rows("SELECT ts, level, bot_id, kind, message FROM events ORDER BY id DESC LIMIT 40")
+    return jsonify({
+        "status": "Ok",
+        "result": {
+            "broker_session": badge,
+            "session_detail": session_state.get("detail"),
+            "session_checked_at": session_state.get("checked_at"),
+            "worker": worker,
+            "worker_heartbeat": heartbeat.get("at"),
+            "market": market_calendar.market_status(now),
+            "live_trading": config.LIVE_TRADING,
+            "ip_authorized": config.IIFL_TRADING_IP_AUTHORIZED,
+            "live_max_qty": config.LIVE_MAX_QTY_PER_ORDER,
+            "global_capital": config.GLOBAL_MAX_CAPITAL,
+            "reconciliation": db.get_runtime("reconciliation"),
+            "events": events,
+        }
+    })
+
+
+@app.route("/iifl/api/orders", methods=["GET"])
+def api_orders():
+    orders = db.rows(
+        "SELECT id, bot_id, symbol, side, mode, qty, state, broker_order_id, filled_qty, avg_price, "
+        "reject_reason, broker_status, created_at, completed_at FROM orders "
+        "WHERE mode='LIVE' ORDER BY id DESC LIMIT 100")
+    return jsonify({"status": "Ok", "result": orders})
 
 
 @app.route("/iifl/api/reports/summary", methods=["GET"])
 def api_reports_summary():
-    trades = list_trades()
-    realized = 0.0
-    winning = 0
-    losing = 0
-    open_count = 0
-
-    for trade in trades:
-        status = str(trade.get("status", "")).upper()
-        pnl = float(trade.get("pnl", 0) or 0)
-        if status == "OPEN":
-            open_count += 1
-        else:
-            realized += pnl
-            if pnl > 0:
-                winning += 1
-            elif pnl < 0:
-                losing += 1
+    mode = request.args.get("mode")
+    where = "WHERE mode=?" if mode in ("LIVE", "PAPER") else ""
+    params = (mode,) if where else ()
+    stats = db.row(
+        f"""SELECT COUNT(*) AS trade_count,
+                   SUM(CASE WHEN status IN ('OPEN','EXIT_SUBMITTED') THEN 1 ELSE 0 END) AS open_trades,
+                   COALESCE(SUM(CASE WHEN status='CLOSED' THEN pnl END),0) AS realized_pnl,
+                   SUM(CASE WHEN status='CLOSED' AND pnl>0 THEN 1 ELSE 0 END) AS winning_trades,
+                   SUM(CASE WHEN status='CLOSED' AND pnl<0 THEN 1 ELSE 0 END) AS losing_trades
+            FROM trades {where}""", params)
+    trades = db.rows(f"SELECT * FROM trades {where} ORDER BY id DESC LIMIT 200", params)
+    trades.reverse()
 
     return jsonify({
         "status": "Ok",
         "result": {
-            "trade_count": len(trades),
-            "open_trades": open_count,
-            "realized_pnl": round(realized, 2),
-            "winning_trades": winning,
-            "losing_trades": losing,
-            "trades": trades[-100:]
+            "trade_count": stats["trade_count"] or 0,
+            "open_trades": stats["open_trades"] or 0,
+            "realized_pnl": round(stats["realized_pnl"] or 0, 2),
+            "winning_trades": stats["winning_trades"] or 0,
+            "losing_trades": stats["losing_trades"] or 0,
+            "trades": trades
         }
     })
 
