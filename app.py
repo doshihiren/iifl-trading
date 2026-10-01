@@ -14,7 +14,7 @@ force_ipv6()
 from instruments import InstrumentLookupError, find_instrument
 from market_data import MarketDataError, historical_candles, market_quote
 from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
-from bot_store import list_bots, upsert_bot, remove_bot, list_trades
+from bot_store import list_bots, upsert_bot, remove_bot, list_trades, update_bot
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32).hex()
@@ -548,6 +548,22 @@ def api_bots_delete(symbol):
         "status": "Ok",
         "removed": removed
     })
+
+
+@app.route("/iifl/api/bots/<symbol>/start", methods=["POST"])
+def api_bot_start(symbol):
+    bot = update_bot(symbol, status="RUNNING", last_error=None)
+    if not bot:
+        return jsonify({"status": "error", "message": "Bot not found"}), 404
+    return jsonify({"status": "Ok", "result": bot})
+
+
+@app.route("/iifl/api/bots/<symbol>/stop", methods=["POST"])
+def api_bot_stop(symbol):
+    bot = update_bot(symbol, status="STOPPED")
+    if not bot:
+        return jsonify({"status": "error", "message": "Bot not found"}), 404
+    return jsonify({"status": "Ok", "result": bot})
 
 
 @app.route("/iifl/api/reports/summary", methods=["GET"])
