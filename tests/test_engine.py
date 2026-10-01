@@ -130,7 +130,7 @@ class Base(unittest.TestCase):
         self.engine = self.make_engine()
 
     def add_bot(self, mode="LIVE", qty=1, target=1.0, timeframe="1m", product="DELIVERY", **kw):
-        b = bot_store.add_bot({"symbol": "SBC", "tradingSymbol": "SBC-EQ", "instrumentId": "6792",
+        b = bot_store.add_bot({"batch_size": kw.get("batch_size", 0), "rebuy_dip_pct": kw.get("dip", 0),"symbol": "SBC", "tradingSymbol": "SBC-EQ", "instrumentId": "6792",
                                "exchange": "NSEEQ", "tick_size": 0.01, "mode": mode, "qty": qty,
                                "target": target, "timeframe": timeframe, "product": product,
                                "maxpos": kw.get("maxpos", 50), "capital": kw.get("capital", 100000),
@@ -439,6 +439,60 @@ class TestLive(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBatch(Base):
+    def buys(self):
+        return db.scalar("SELECT COUNT(*) FROM orders WHERE side='BUY' AND state='FILLED'")
+
+    def run_minutes(self, n):
+        for _ in range(n):
+            self.tick(); self.tick()
+            self.now += timedelta(minutes=1)
+
+    def test_batch_pause_and_rebuy_after_dip(self):
+        bid = self.add_bot(mode="PAPER", target=1.0, batch_size=3, dip=2.0)
+        self.run_minutes(6)
+        self.assertEqual(self.buys(), 3)                       # stopped after 3
+        self.assertEqual(bot_store.get_bot(bid)["batch_state"], "WAITING_SELL")
+        self.prices["6792"] = 60.00                            # all 3 lots (target 59.59) sell
+        self.run_minutes(1)
+        bot = bot_store.get_bot(bid)
+        self.assertEqual(bot["batch_state"], "WAITING_DIP")
+        self.assertEqual(bot["rebuy_ref_price"], 60.0)
+        self.assertEqual(bot["rebuy_trigger_price"], 58.80)    # 60 - 2%
+        self.prices["6792"] = 59.00                            # only -1.7%: still waiting
+        self.run_minutes(3)
+        self.assertEqual(self.buys(), 3)
+        self.prices["6792"] = 58.80                            # -2%: new batch
+        self.run_minutes(5)
+        self.assertEqual(self.buys(), 6)
+        bot = bot_store.get_bot(bid)
+        self.assertEqual((bot["batch_no"], bot["batch_state"]), (2, "WAITING_SELL"))
+
+    def test_first_buy_of_new_batch_is_immediate(self):
+        bid = self.add_bot(mode="PAPER", timeframe="15m", batch_size=1, dip=1.0)
+        self.tick()
+        self.assertEqual(self.buys(), 1)
+        self.prices["6792"] = 59.60
+        self.tick(); self.tick()
+        self.prices["6792"] = 59.00                            # trigger 59.60*0.99=59.00
+        self.tick()
+        self.assertEqual(self.buys(), 2)                       # same 15m slot, new batch
+
+    def test_batch_survives_restart_live(self):
+        bid = self.add_bot(batch_size=2, dip=1.0)
+        self.broker.auto_fill_price = 59.0
+        self.run_minutes(4)
+        self.assertEqual(len(self.broker.placed), 2)
+        self.restart()
+        self.run_minutes(3)
+        self.assertEqual(len(self.broker.placed), 2)           # still paused after restart
+
+    def test_zero_batch_size_keeps_old_behaviour(self):
+        self.add_bot(mode="PAPER")
+        self.run_minutes(5)
+        self.assertEqual(self.buys(), 5)
 
 
 class TestReports(Base):

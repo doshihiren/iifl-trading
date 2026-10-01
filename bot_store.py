@@ -6,6 +6,7 @@ import db
 
 BOT_FIELDS = {
     "symbol", "tradingSymbol", "instrumentId", "exchange", "tick_size", "mode", "qty", "qty_random_pct",
+    "batch_size", "rebuy_dip_pct", "batch_no", "batch_state", "rebuy_ref_price", "rebuy_trigger_price",
     "target", "timeframe", "product", "maxpos", "capital", "status", "last_entry_slot",
     "last_tick", "last_ltp", "last_order", "last_error", "deleted",
 }
@@ -33,8 +34,8 @@ def add_bot(bot):
         c.execute(
             """INSERT INTO bots(bot_id, symbol, tradingSymbol, instrumentId, exchange, tick_size,
                    mode, qty, qty_random_pct, target, timeframe, product, maxpos, capital, status,
-                   created_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   batch_size, rebuy_dip_pct, created_at, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 bot_id,
                 str(bot["symbol"]).upper(),
@@ -51,6 +52,8 @@ def add_bot(bot):
                 int(bot.get("maxpos", 10)),
                 float(bot.get("capital", 100000)),
                 bot.get("status", "READY"),
+                int(bot.get("batch_size", 0) or 0),
+                float(bot.get("rebuy_dip_pct", 0) or 0),
                 ts,
                 ts,
             ),

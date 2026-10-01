@@ -538,7 +538,25 @@ def _bot_summary(bot):
     bot["open_qty"] = sum(int(l["quantity"]) for l in lots)
     bot["deployed_capital"] = round(sum(float(l["entry_price"]) * int(l["quantity"]) for l in lots), 2)
     bot["pending_orders"] = int(pending or 0)
+    bot["batch_bought"] = int(db.scalar(
+        "SELECT COUNT(*) FROM orders WHERE bot_id=? AND side='BUY' AND batch_no=? "
+        "AND state IN ('FILLED',?,?,?,?)",
+        (bot["bot_id"], int(bot.get("batch_no") or 1), *ACTIVE_ORDER_STATES)) or 0)
     return bot
+
+
+def _batch_settings(body):
+    """Validate batch fields. Returns (batch_size, rebuy_dip_pct) or raises ValueError."""
+    try:
+        size = int(body.get("batch_size", 0) or 0)
+        dip = float(body.get("rebuy_dip_pct", 0) or 0)
+    except (TypeError, ValueError):
+        raise ValueError("Invalid batch settings")
+    if size < 0:
+        raise ValueError("Max buys per batch cannot be negative")
+    if not 0 <= dip <= 50:
+        raise ValueError("Re-buy drop % must be between 0 and 50")
+    return size, dip
 
 
 @app.route("/iifl/api/bots", methods=["GET"])
@@ -591,6 +609,10 @@ def api_bots_save():
         return jsonify({"status": "error", "message": "Invalid qty random %"}), 400
     if not 0 <= qty_random_pct <= 50:
         return jsonify({"status": "error", "message": "Qty random % must be between 0 and 50"}), 400
+    try:
+        batch_size, rebuy_dip_pct = _batch_settings(body)
+    except ValueError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
 
     saved = add_bot({
         "symbol": symbol,
@@ -601,6 +623,8 @@ def api_bots_save():
         "mode": mode,
         "qty": quantity,
         "qty_random_pct": qty_random_pct,
+        "batch_size": batch_size,
+        "rebuy_dip_pct": rebuy_dip_pct,
         "target": target,
         "timeframe": timeframe,
         "product": product,
@@ -638,9 +662,59 @@ def api_bots_delete(bot_id):
     })
 
 
+@app.route("/iifl/api/bots/<bot_id>", methods=["PATCH"])
+def api_bots_edit(bot_id):
+    """Change sizing/batch settings of an existing bot. New values apply to new entries only."""
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({"status": "error", "message": "Bot not found"}), 404
+    body = request.get_json(silent=True) or {}
+    changes = {}
+    try:
+        for key, cast, lo, hi in (("qty", int, 1, None), ("qty_random_pct", float, 0, 50),
+                                  ("target", float, 0.01, None), ("maxpos", int, 1, None),
+                                  ("capital", float, 1, None)):
+            if key in body and body[key] not in (None, ""):
+                value = cast(body[key])
+                if value < lo or (hi is not None and value > hi):
+                    raise ValueError(f"{key} out of range")
+                changes[key] = value
+        if "batch_size" in body or "rebuy_dip_pct" in body:
+            size, dip = _batch_settings({"batch_size": body.get("batch_size", bot["batch_size"]),
+                                         "rebuy_dip_pct": body.get("rebuy_dip_pct", bot["rebuy_dip_pct"])})
+            changes["batch_size"] = size
+            changes["rebuy_dip_pct"] = dip
+            if size == 0:
+                changes.update(batch_state="BUYING", rebuy_ref_price=None, rebuy_trigger_price=None)
+            elif int(bot.get("batch_size") or 0) == 0:
+                # Turning batching on: count from a fresh batch, not from old buys.
+                changes.update(batch_no=int(bot.get("batch_no") or 1) + 1, batch_state="BUYING",
+                               rebuy_ref_price=None, rebuy_trigger_price=None)
+            elif bot.get("batch_state") == "WAITING_DIP" and bot.get("rebuy_ref_price"):
+                # Re-arm the waiting level with the new drop %.
+                from engine import floor_to_tick
+                changes["rebuy_trigger_price"] = floor_to_tick(
+                    float(bot["rebuy_ref_price"]) * (1 - dip / 100.0), bot["tick_size"])
+    except (TypeError, ValueError) as e:
+        return jsonify({"status": "error", "message": f"Invalid value: {e}"}), 400
+    saved = update_bot(bot_id, **changes)
+    db.add_event("BOT_EDITED", "Settings changed: " + ", ".join(f"{k}={v}" for k, v in changes.items()
+                                                                 if not k.startswith("rebuy_ref")),
+                 bot_id=bot_id)
+    return jsonify({"status": "Ok", "result": saved})
+
+
 @app.route("/iifl/api/bots/<bot_id>/start", methods=["POST"])
 def api_bot_start(bot_id):
-    bot = update_bot(bot_id, status="RUNNING", last_error=None)
+    current = get_bot(bot_id)
+    if not current:
+        return jsonify({"status": "error", "message": "Bot not found"}), 404
+    extra = {}
+    if current["status"] != "RUNNING" and int(current.get("batch_size") or 0) > 0:
+        # A manual Start begins a fresh batch.
+        extra = {"batch_no": int(current.get("batch_no") or 1) + 1, "batch_state": "BUYING",
+                 "rebuy_ref_price": None, "rebuy_trigger_price": None}
+    bot = update_bot(bot_id, status="RUNNING", last_error=None, **extra)
     if not bot:
         return jsonify({"status": "error", "message": "Bot not found"}), 404
     db.add_event("BOT_START", f"{bot['mode']} bot {bot['symbol']} started", bot_id=bot_id)

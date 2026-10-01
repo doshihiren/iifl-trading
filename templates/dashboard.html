@@ -13,6 +13,8 @@
     .badge.bad{background:#43232a;color:#ffc5ca}.badge.warn{background:#3d3115;color:#ffd98a}.badge.info{background:#1b2a4a;color:#b9d2ff}
     .badges{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.badges a{color:inherit}
     .btn-sm{padding:7px 10px;font-size:12px;border-radius:9px;margin:2px 0}
+    .acts{display:flex;flex-direction:column;gap:4px;min-width:118px}.acts .btn-sm{margin:0;width:100%}
+    #bots td{padding:10px 6px}
     .err{color:#ff9da4}.pos{color:var(--green)}.neg{color:var(--red)}
     .events{max-height:320px;overflow:auto;font-size:12px}.events div{padding:6px 0;border-bottom:1px solid var(--line)}
     .events .ERROR{color:#ff9da4}.events .WARNING{color:#ffd98a}
@@ -64,6 +66,8 @@
         <div class="field"><label>Timeframe</label><select id="timeframe"><option>1m</option><option>5m</option><option selected>15m</option></select></div>
         <div class="field"><label>Quantity per entry</label><input id="qty" type="number" value="1" min="1"></div>
         <div class="field"><label>Qty random ± %</label><input id="qtyRandom" type="number" value="10" min="0" max="50" step="1"><div class="meta" id="qtyHint">Each order: 1 to 1</div></div>
+        <div class="field"><label>Max buys per batch <span title="0 = no batch limit (buy every slot)">(0 = off)</span></label><input id="batchSize" type="number" value="0" min="0" step="1"></div>
+        <div class="field"><label>Re-buy after drop % from last sell</label><input id="rebuyDip" type="number" value="1" min="0" max="50" step="0.05"></div>
         <div class="field"><label>Profit target %</label><input id="target" type="number" value="1.0" min="0.01" step="0.01"></div>
         <div class="field"><label>Max open positions</label><input id="maxpos" type="number" value="10" min="1"></div>
         <div class="field"><label>Max capital</label><input id="capital" type="number" value="100000" min="1"></div>
@@ -126,6 +130,16 @@
 </div>
 </div>
 
+<div id="editBox" style="display:none;position:fixed;inset:0;background:rgba(3,7,16,.7);z-index:20;align-items:center;justify-content:center;padding:16px">
+  <div class="card" style="width:100%;max-width:520px">
+    <h2 id="editTitle">Edit bot</h2>
+    <div class="formgrid" id="editFields"></div>
+    <div class="notice" style="margin:4px 0 12px">Changes apply to new entries. Open positions keep their own entry price and target.</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end"><button class="secondary" onclick="closeEdit()">Cancel</button><button class="start" onclick="saveEdit()">Save</button></div>
+    <div id="editStatus" class="status"></div>
+  </div>
+</div>
+
 <script>
 let verified = null;
 let bots = [];
@@ -173,6 +187,8 @@ async function addBot(){
     mode:document.getElementById('mode').value,
     qty:Number(document.getElementById('qty').value),
     qty_random_pct:Number(document.getElementById('qtyRandom').value),
+    batch_size:Number(document.getElementById('batchSize').value),
+    rebuy_dip_pct:Number(document.getElementById('rebuyDip').value),
     target:Number(document.getElementById('target').value),
     timeframe:document.getElementById('timeframe').value,
     product:document.getElementById('product').value,
@@ -264,19 +280,27 @@ function renderBots(){
     if(b.open_positions>0 && b.status!=='EXITING'){
       btns+='<button class="danger btn-sm" onclick="exitBot(\''+id+'\',\''+sym+'\')">Exit &amp; Stop</button> ';
     }
+    btns+='<button class="secondary btn-sm" onclick="openEdit(\''+id+'\')">Edit</button> ';
     btns+='<button class="danger btn-sm" onclick="removeBot(\''+id+'\',\''+sym+'\')">Remove</button>';
     const statusLabel = b.status==='STOPPED' && b.open_positions>0 ? 'STOPPED (managing exits)' : b.status;
     const err = b.last_error ? '<div class="meta err">'+esc(b.last_error)+'</div>' : '';
     const pend = b.pending_orders ? '<div class="meta">'+b.pending_orders+' order(s) pending at broker</div>' : '';
+    let batch='';
+    if(Number(b.batch_size)>0){
+      if(b.batch_state==='BUYING') batch='Batch '+b.batch_no+': bought '+b.batch_bought+'/'+b.batch_size;
+      else if(b.batch_state==='WAITING_SELL') batch='Batch '+b.batch_no+' full ('+b.batch_size+'/'+b.batch_size+') • waiting for a sell';
+      else if(b.batch_state==='WAITING_DIP') batch='Waiting: re-buy at ≤ '+px(b.rebuy_trigger_price)+' ('+esc(b.rebuy_dip_pct)+'% below sell '+px(b.rebuy_ref_price)+')';
+      batch='<div class="meta" style="color:#b9d2ff">'+batch+'</div>';
+    }
     tr.innerHTML='<td><b>'+sym+'</b><div class="meta">'+esc(b.timeframe)+' • '+esc(b.product)+' • '+id+'</div></td>'+
       '<td><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+esc(b.mode)+'</span></td>'+
       '<td>'+esc(b.qty)+(Number(b.qty_random_pct)>0?' ±'+esc(b.qty_random_pct)+'%':'')+' / '+esc(b.target)+'%<div class="meta">max '+esc(b.maxpos)+' • cap ₹'+Number(b.capital).toLocaleString('en-IN')+'</div></td>'+
-      '<td><span class="pill">'+esc(statusLabel || 'READY')+'</span>'+pend+err+'</td>'+
+      '<td style="min-width:170px"><span class="pill">'+esc(statusLabel || 'READY')+'</span>'+batch+pend+err+'</td>'+
       '<td>'+esc(b.open_positions)+'<div class="meta">'+esc(b.open_qty)+' sh</div></td>'+
       '<td>'+money(b.deployed_capital)+'</td>'+
       '<td>'+px(b.last_ltp)+'<div class="meta">'+tm(b.last_tick)+'</div></td>'+
-      '<td style="min-width:170px"><span class="meta">'+esc(b.last_order || '-')+'</span></td>'+
-      '<td style="white-space:nowrap">'+btns+'</td>';
+      '<td style="min-width:120px;white-space:normal"><span class="meta">'+esc(b.last_order || '-')+'</span></td>'+
+      '<td><div class="acts">'+btns+'</div></td>';
     tbody.appendChild(tr);
   });
   document.getElementById('botCount').textContent=bots.length;
@@ -368,6 +392,29 @@ function updateQtyHint(){const r=qtyRange(Number(document.getElementById('qty').
 document.getElementById('qty').addEventListener('input',updateQtyHint);
 document.getElementById('qtyRandom').addEventListener('input',updateQtyHint);
 updateQtyHint();
+
+// ---------- edit bot ----------
+const EDIT_FIELDS=[['qty','Quantity per entry',1,1],['qty_random_pct','Qty random ± %',0,0.5],['target','Profit target %',0.01,0.01],
+  ['maxpos','Max open positions',1,1],['capital','Max capital',1,1],['batch_size','Max buys per batch (0 = off)',0,1],['rebuy_dip_pct','Re-buy after drop % from last sell',0,0.05]];
+function openEdit(id){
+  const b=bots.find(x=>x.bot_id===id); if(!b) return;
+  document.getElementById('editTitle').textContent='Edit '+b.symbol+' '+b.timeframe+' '+b.mode+' ('+b.bot_id+')';
+  document.getElementById('editFields').innerHTML=EDIT_FIELDS.map(f=>'<div class="field"><label>'+f[1]+'</label><input id="e_'+f[0]+'" type="number" min="'+f[2]+'" step="'+f[3]+'" value="'+esc(b[f[0]])+'"></div>').join('');
+  document.getElementById('editStatus').textContent='';
+  document.getElementById('editBox').dataset.id=id;
+  document.getElementById('editBox').style.display='flex';
+}
+function closeEdit(){document.getElementById('editBox').style.display='none'}
+async function saveEdit(){
+  const id=document.getElementById('editBox').dataset.id, body={};
+  EDIT_FIELDS.forEach(f=>{body[f[0]]=Number(document.getElementById('e_'+f[0]).value)});
+  const st=document.getElementById('editStatus'); st.textContent='Saving…';
+  try{
+    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json(); if(!r.ok) throw new Error(d.message||'Could not save');
+    closeEdit(); await loadBots();
+  }catch(e){st.textContent=e.message}
+}
 
 loadSystem();
 loadBots();

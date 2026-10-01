@@ -309,6 +309,15 @@ def init_db():
 # Columns added after the first release: (table, column, definition)
 LATER_COLUMNS = [
     ("bots", "qty_random_pct", "REAL NOT NULL DEFAULT 10"),
+    # Batch buying: buy up to batch_size entries, pause, and after a sell wait
+    # for the price to fall rebuy_dip_pct below that sell before the next batch.
+    ("bots", "batch_size", "INTEGER NOT NULL DEFAULT 0"),
+    ("bots", "rebuy_dip_pct", "REAL NOT NULL DEFAULT 0"),
+    ("bots", "batch_no", "INTEGER NOT NULL DEFAULT 1"),
+    ("bots", "batch_state", "TEXT NOT NULL DEFAULT 'BUYING'"),
+    ("bots", "rebuy_ref_price", "REAL"),
+    ("bots", "rebuy_trigger_price", "REAL"),
+    ("orders", "batch_no", "INTEGER"),
 ]
 
 

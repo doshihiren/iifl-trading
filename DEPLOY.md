@@ -100,6 +100,14 @@ Only after this works, add your real-size bots.
 
 Each entry uses the bot's qty ± its "Qty random %" (default 10%). Example: qty 125 → every order is a random whole number from 113 to 137. Set the random % to 0 for an exact qty. The bot's max capital and `GLOBAL_MAX_CAPITAL` are the size limits; `LIVE_MAX_QTY_PER_ORDER` is no longer used.
 
+## Batch buying (optional, per bot)
+
+- **Max buys per batch** (0 = off): the bot buys on each time slot until it has made this many buys, then pauses new buys.
+- After any SELL of that bot fills, it watches the live price. When the price is **Re-buy drop %** below that sell price, a new batch starts and it buys again, up to the same count. The first buy of the new batch happens immediately.
+- If another sell fills while waiting, the re-buy level moves to that latest sell price.
+- Max positions, capital limits, targets and exits work exactly as before.
+- Pressing **Start** on a stopped bot begins a fresh batch. **Edit** changes settings without removing the bot (new values apply to new entries).
+
 ## Reports
 
 Dashboard → **Reports** (or `/iifl/reports`): date range presets, LIVE/PAPER filter, script, bot, and grouping by day, week, month, script, bot, mode, timeframe, product or exit reason. Daily and cumulative P&L charts, LIVE vs PAPER comparison, open positions with unrealized P&L, and CSV download.

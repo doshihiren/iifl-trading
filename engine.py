@@ -51,6 +51,14 @@ def ceil_to_tick(price, tick):
     return float(steps * t)
 
 
+def floor_to_tick(price, tick):
+    from decimal import ROUND_FLOOR
+    p = Decimal(str(price))
+    t = Decimal(str(tick or 0.05))
+    steps = (p / t).to_integral_value(rounding=ROUND_FLOOR)
+    return float(steps * t)
+
+
 def target_from_fill(fill_price, target_pct, tick):
     raw = Decimal(str(fill_price)) * (Decimal(1) + Decimal(str(target_pct)) / Decimal(100))
     return ceil_to_tick(raw, tick)
@@ -302,6 +310,7 @@ class Engine:
         if fresh["status"] == "EXITING":
             self._maybe_finish_exiting(fresh)
         elif fresh["status"] == "RUNNING":
+            fresh = self.update_batch(fresh, ltp, now)
             self.maybe_enter(fresh, ltp, now)
 
     def _maybe_finish_exiting(self, bot):
@@ -334,7 +343,15 @@ class Engine:
     def maybe_enter(self, bot, ltp, now):
         bot_id = bot["bot_id"]
         slot = current_slot(bot["timeframe"], now)
-        if not slot or bot.get("last_entry_slot") == slot:
+        if not slot:
+            return
+        batching = int(bot.get("batch_size") or 0) > 0
+        if batching:
+            if bot.get("batch_state") != "BUYING" or self.batch_count(bot) >= int(bot["batch_size"]):
+                return
+            # Batch number is part of the key so a new batch may buy in the same slot.
+            slot = f"{slot}|B{int(bot.get('batch_no') or 1)}"
+        if bot.get("last_entry_slot") == slot:
             return
         if bot["product"] == "INTRADAY" and cal.at_or_after(now, config.INTRADAY_LAST_ENTRY):
             return
@@ -403,6 +420,58 @@ class Engine:
         if mode == "LIVE":
             self._send(order_id)
 
+    # ---------- batch buying ----------
+    def batch_count(self, bot):
+        """BUY orders of the current batch that filled or are still working."""
+        return int(db.scalar(
+            f"SELECT COUNT(*) FROM orders WHERE bot_id=? AND side='BUY' AND batch_no=? "
+            f"AND state IN ('FILLED',{','.join('?'*len(ACTIVE_ORDER_STATES))})",
+            (bot["bot_id"], int(bot.get("batch_no") or 1), *ACTIVE_ORDER_STATES)) or 0)
+
+    def update_batch(self, bot, ltp, now):
+        size = int(bot.get("batch_size") or 0)
+        if size <= 0:
+            return bot
+        bot_id = bot["bot_id"]
+        state = bot.get("batch_state") or "BUYING"
+        if state == "BUYING" and self.batch_count(bot) >= size:
+            with db.tx() as c:
+                c.execute("UPDATE bots SET batch_state='WAITING_SELL', updated_at=? WHERE bot_id=? "
+                          "AND batch_state='BUYING'", (db.now_utc(), bot_id))
+            elog("BATCH_DONE", f"Batch {bot['batch_no']} complete ({size} buys); waiting for a sell",
+                 bot_id=bot_id, store=(bot["mode"] == "LIVE"))
+        elif state == "WAITING_DIP" and bot.get("rebuy_trigger_price") is not None \
+                and ltp <= float(bot["rebuy_trigger_price"]):
+            with db.tx() as c:
+                c.execute("UPDATE bots SET batch_no=batch_no+1, batch_state='BUYING', rebuy_ref_price=NULL, "
+                          "rebuy_trigger_price=NULL, updated_at=? WHERE bot_id=? AND batch_state='WAITING_DIP'",
+                          (db.now_utc(), bot_id))
+            elog("BATCH_START", f"Price {ltp} reached re-buy level {bot['rebuy_trigger_price']} "
+                 f"({bot['rebuy_dip_pct']}% below sell {bot['rebuy_ref_price']}); starting batch {int(bot['batch_no']) + 1}",
+                 bot_id=bot_id, ltp=ltp, store=(bot["mode"] == "LIVE"))
+        return db.row("SELECT * FROM bots WHERE bot_id=?", (bot_id,))
+
+    def _batch_after_sell(self, c, bot, sell_price):
+        """Called inside the SELL-fill transaction: arm the re-buy level."""
+        size = int(bot.get("batch_size") or 0)
+        if size <= 0:
+            return
+        state = bot.get("batch_state") or "BUYING"
+        if state == "BUYING":
+            done = c.execute(
+                f"SELECT COUNT(*) FROM orders WHERE bot_id=? AND side='BUY' AND batch_no=? "
+                f"AND state IN ('FILLED',{','.join('?'*len(ACTIVE_ORDER_STATES))})",
+                (bot["bot_id"], int(bot.get("batch_no") or 1), *ACTIVE_ORDER_STATES)).fetchone()[0]
+            if done < size:
+                return            # batch still filling; sells during it change nothing
+        dip = max(0.0, float(bot.get("rebuy_dip_pct") or 0))
+        trigger = floor_to_tick(Decimal(str(sell_price)) * (Decimal(1) - Decimal(str(dip)) / Decimal(100)),
+                                bot["tick_size"])
+        c.execute("UPDATE bots SET batch_state='WAITING_DIP', rebuy_ref_price=?, rebuy_trigger_price=?, "
+                  "updated_at=? WHERE bot_id=?", (float(sell_price), trigger, db.now_utc(), bot["bot_id"]))
+        db.add_event("REBUY_ARMED", f"Sold @ {float(sell_price):.2f}; next batch starts when price ≤ {trigger:.2f} "
+                     f"({dip:g}% lower)", bot_id=bot["bot_id"])
+
     def deployed_capital(self, mode):
         held = db.scalar(
             "SELECT COALESCE(SUM(entry_price*quantity),0) FROM trades WHERE mode=? AND status IN ('OPEN','EXIT_SUBMITTED')",
@@ -418,11 +487,12 @@ class Engine:
         tag = order_tag(order_key) if (bot["mode"] == "LIVE" and config.SEND_ORDER_TAG) else None
         cur = c.execute(
             """INSERT INTO orders(order_key, bot_id, signal_key, lot_id, side, mode, symbol, instrumentId,
-                   exchange, product, qty, reference_price, state, order_tag, created_at, submitted_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   exchange, product, qty, reference_price, state, order_tag, batch_no,
+                   created_at, submitted_at, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (order_key, bot["bot_id"], signal_key, lot_id, side, bot["mode"], bot["symbol"],
              str(bot["instrumentId"]), bot["exchange"], bot["product"], int(qty), ref, state, tag,
-             ts, ts, ts))
+             int(bot.get("batch_no") or 1), ts, ts, ts))
         return cur.lastrowid
 
     # ---------- exits ----------
@@ -703,6 +773,7 @@ class Engine:
                      lot["entry_order_id"], lot["broker_buy_order_id"], lot["created_at"]))
             c.execute("UPDATE bots SET last_order=?, updated_at=? WHERE bot_id=?",
                       (f"SELL {sold} filled @ {price:.2f} P&L {pnl:+.2f}", ts, o["bot_id"]))
+            self._batch_after_sell(c, bot, price)
             if o["mode"] == "LIVE":
                 db.add_event("FILLED", f"SELL {o['symbol']} {sold} @ {price:.2f}, P&L {pnl:+.2f}",
                              bot_id=o["bot_id"], data={"lot": lot["id"], "broker_order_id": o["broker_order_id"]})
