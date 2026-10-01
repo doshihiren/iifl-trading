@@ -163,10 +163,10 @@ async function addBot(){
   }
 }
 
-async function removeBot(symbol){
+async function removeBot(botId, symbol){
   if(!confirm('Remove '+symbol+' bot configuration?')) return;
   try{
-    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(symbol),{method:'DELETE'});
+    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(botId),{method:'DELETE'});
     const data=await r.json();
     if(!r.ok) throw new Error(data.message || 'Could not remove bot');
     await loadBots();
@@ -176,9 +176,9 @@ async function removeBot(symbol){
 }
 
 
-async function startBot(symbol){
+async function startBot(botId){
   try{
-    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(symbol)+'/start',{method:'POST'});
+    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(botId)+'/start',{method:'POST'});
     const data=await r.json();
     if(!r.ok) throw new Error(data.message || 'Could not start bot');
     await loadBots();
@@ -187,9 +187,9 @@ async function startBot(symbol){
   }
 }
 
-async function stopBot(symbol){
+async function stopBot(botId){
   try{
-    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(symbol)+'/stop',{method:'POST'});
+    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(botId)+'/stop',{method:'POST'});
     const data=await r.json();
     if(!r.ok) throw new Error(data.message || 'Could not stop bot');
     await loadBots();
@@ -205,17 +205,17 @@ function renderBots(){
     const tr=document.createElement('tr');
     const running=(b.status==='RUNNING' || b.status==='ACTION_REQUIRED');
     const actionBtn = running
-      ? '<button class="secondary" onclick="stopBot(\''+b.symbol+'\')">Stop</button>'
-      : '<button class="start" onclick="startBot(\''+b.symbol+'\')">Start</button>';
+      ? '<button class="secondary" onclick="stopBot(\''+b.bot_id+'\')">Stop</button>'
+      : '<button class="start" onclick="startBot(\''+b.bot_id+'\')">Start</button>';
     const pending = b.pending_order
       ? '<div class="meta">'+String(b.pending_order.side)+' pending • '+String(b.pending_order.quantity)+' qty</div>'
       : '';
     const err = b.last_error ? '<div class="meta" style="color:#ff9da4">'+String(b.last_error)+'</div>' : '';
-    tr.innerHTML='<td><b>'+b.symbol+'</b><div class="meta">'+b.timeframe+' • '+b.product+'</div></td>'+
+    tr.innerHTML='<td><b>'+b.symbol+'</b><div class="meta">'+b.timeframe+' • '+b.product+' • '+String(b.bot_id || '')+'</div></td>'+
       '<td><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+b.mode+'</span></td>'+
       '<td>'+b.qty+'</td><td>'+b.target+'%</td><td><span class="pill">'+(b.status || 'READY')+'</span>'+pending+err+'</td>'+
       '<td><span class="meta">'+(b.last_tick || '-')+'</span></td>'+
-      '<td>'+actionBtn+' <button class="danger" onclick="removeBot(\''+b.symbol+'\')">Remove</button></td>';
+      '<td>'+actionBtn+' <button class="danger" onclick="removeBot(\''+b.bot_id+'\',\''+b.symbol+'\')">Remove</button></td>';
     tbody.appendChild(tr);
   });
   document.getElementById('botCount').textContent=bots.length;
