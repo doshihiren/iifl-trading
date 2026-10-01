@@ -34,6 +34,7 @@ def current_slot(bot, now=None):
     total = now.hour * 60 + now.minute
     if total < start:
         return None
+
     step = timeframe_minutes(bot.get("timeframe", "15m"))
     slot = start + ((total - start) // step) * step
     hour, minute = divmod(slot, 60)
@@ -58,10 +59,12 @@ def total_open_capital():
 
 
 def manage_targets(bot, ltp):
+    bot_id = bot["bot_id"]
+
     if bot.get("pending_order"):
         return
 
-    for trade in open_trades(bot["symbol"]):
+    for trade in open_trades(bot_id=bot_id):
         if ltp < float(trade.get("target_price", 0)):
             continue
 
@@ -69,7 +72,7 @@ def manage_targets(bot, ltp):
             close_trade(trade["id"], exit_price=ltp)
         else:
             update_bot(
-                bot["symbol"],
+                bot_id,
                 status="ACTION_REQUIRED",
                 pending_order={
                     "side": "SELL",
@@ -83,6 +86,8 @@ def manage_targets(bot, ltp):
 
 
 def maybe_create_entry(bot, ltp):
+    bot_id = bot["bot_id"]
+
     if bot.get("pending_order"):
         return
 
@@ -92,28 +97,45 @@ def maybe_create_entry(bot, ltp):
 
     qty = int(bot.get("qty", 1))
     estimated = ltp * qty
-    opens = open_trades(bot["symbol"])
+    opens = open_trades(bot_id=bot_id)
 
     if len(opens) >= int(bot.get("maxpos", 10)):
-        update_bot(bot["symbol"], last_entry_slot=slot, last_error="Max open positions reached")
+        update_bot(
+            bot_id,
+            last_entry_slot=slot,
+            last_error="Max open positions reached",
+        )
         return
 
-    symbol_capital = sum(
+    bot_capital = sum(
         float(t.get("entry_price", 0)) * int(t.get("quantity", 0))
         for t in opens
     )
-    if symbol_capital + estimated > float(bot.get("capital", GLOBAL_MAX_CAPITAL)):
-        update_bot(bot["symbol"], last_entry_slot=slot, last_error="Bot capital limit reached")
+
+    if bot_capital + estimated > float(bot.get("capital", GLOBAL_MAX_CAPITAL)):
+        update_bot(
+            bot_id,
+            last_entry_slot=slot,
+            last_error="Bot capital limit reached",
+        )
         return
 
     if total_open_capital() + estimated > GLOBAL_MAX_CAPITAL:
-        update_bot(bot["symbol"], last_entry_slot=slot, last_error="Global capital limit reached")
+        update_bot(
+            bot_id,
+            last_entry_slot=slot,
+            last_error="Global capital limit reached",
+        )
         return
 
-    target = round(ltp * (1 + float(bot.get("target", 1.0)) / 100.0), 2)
+    target = round(
+        ltp * (1 + float(bot.get("target", 1.0)) / 100.0),
+        2,
+    )
 
     if bot.get("mode") == "PAPER":
         add_trade({
+            "bot_id": bot_id,
             "symbol": bot["symbol"],
             "side": "BUY",
             "quantity": qty,
@@ -124,8 +146,9 @@ def maybe_create_entry(bot, ltp):
             "timeframe": bot.get("timeframe", "15m"),
             "pnl": 0.0,
         })
+
         update_bot(
-            bot["symbol"],
+            bot_id,
             last_entry_slot=slot,
             last_tick=now_ist().isoformat(),
             last_error=None,
@@ -133,7 +156,7 @@ def maybe_create_entry(bot, ltp):
         )
     else:
         update_bot(
-            bot["symbol"],
+            bot_id,
             last_entry_slot=slot,
             status="ACTION_REQUIRED",
             last_tick=now_ist().isoformat(),
@@ -155,16 +178,30 @@ def run_once():
     for bot in list_bots():
         if bot.get("status") != "RUNNING":
             continue
+
+        bot_id = bot.get("bot_id")
+        if not bot_id:
+            continue
+
         try:
             ltp = get_ltp(bot)
             manage_targets(bot, ltp)
-            fresh = next((b for b in list_bots() if b.get("symbol") == bot["symbol"]), bot)
+
+            fresh = next(
+                (b for b in list_bots() if b.get("bot_id") == bot_id),
+                bot,
+            )
+
             if fresh.get("status") == "RUNNING":
                 maybe_create_entry(fresh, ltp)
-            update_bot(bot["symbol"], last_tick=now_ist().isoformat())
+
+            update_bot(
+                bot_id,
+                last_tick=now_ist().isoformat(),
+            )
         except Exception as exc:
             update_bot(
-                bot["symbol"],
+                bot_id,
                 last_tick=now_ist().isoformat(),
                 last_error=str(exc),
             )
