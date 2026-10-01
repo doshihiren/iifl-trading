@@ -239,7 +239,7 @@ async function loadReports(){
     }
     trades.slice().reverse().forEach(t=>{
       const tr=document.createElement('tr');
-      tr.innerHTML='<td>'+String(t.symbol || '-')+'</td>'+
+      tr.innerHTML='<td>'+String(t.symbol || '-')+'<div class="meta">'+String(t.bot_id || '')+'</div></td>'+
         '<td>'+String(t.side || '-')+'</td>'+
         '<td>'+String(t.quantity || t.qty || '-')+'</td>'+
         '<td>'+String(t.entry_price ?? '-')+'</td>'+
