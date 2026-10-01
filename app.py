@@ -18,6 +18,7 @@ from bot_store import add_bot, get_bot, list_bots, remove_bot, list_trades, upda
 import config
 import db
 import market_calendar
+import reports
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -584,12 +585,12 @@ def api_bots_save():
     if quantity <= 0 or target <= 0 or maxpos <= 0 or capital <= 0:
         return jsonify({"status": "error", "message": "Bot settings must be greater than zero"}), 400
 
-    if mode == "LIVE" and quantity > config.LIVE_MAX_QTY_PER_ORDER:
-        return jsonify({
-            "status": "error",
-            "message": f"LIVE qty is limited to {config.LIVE_MAX_QTY_PER_ORDER} per order "
-                       f"(LIVE_MAX_QTY_PER_ORDER in .env)"
-        }), 400
+    try:
+        qty_random_pct = float(body.get("qty_random_pct", 10))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Invalid qty random %"}), 400
+    if not 0 <= qty_random_pct <= 50:
+        return jsonify({"status": "error", "message": "Qty random % must be between 0 and 50"}), 400
 
     saved = add_bot({
         "symbol": symbol,
@@ -599,6 +600,7 @@ def api_bots_save():
         "tick_size": _tick_size(instrument),
         "mode": mode,
         "qty": quantity,
+        "qty_random_pct": qty_random_pct,
         "target": target,
         "timeframe": timeframe,
         "product": product,
@@ -606,7 +608,7 @@ def api_bots_save():
         "capital": capital,
         "status": "READY"
     })
-    db.add_event("BOT_ADDED", f"{mode} bot {symbol} {timeframe} qty {quantity} target {target}%",
+    db.add_event("BOT_ADDED", f"{mode} bot {symbol} {timeframe} qty {quantity} ±{qty_random_pct:g}% target {target}%",
                  bot_id=saved["bot_id"])
 
     return jsonify({
@@ -710,7 +712,6 @@ def api_system():
             "market": market_calendar.market_status(now),
             "live_trading": config.LIVE_TRADING,
             "ip_authorized": config.IIFL_TRADING_IP_AUTHORIZED,
-            "live_max_qty": config.LIVE_MAX_QTY_PER_ORDER,
             "global_capital": config.GLOBAL_MAX_CAPITAL,
             "reconciliation": db.get_runtime("reconciliation"),
             "events": events,
@@ -753,6 +754,28 @@ def api_reports_summary():
             "trades": trades
         }
     })
+
+
+@app.route("/iifl/reports")
+def reports_page():
+    return render_template("reports.html", dashboard_username=DASHBOARD_USERNAME)
+
+
+@app.route("/iifl/api/reports/detail", methods=["GET"])
+def api_reports_detail():
+    return jsonify({"status": "Ok", "result": reports.build(request.args)})
+
+
+@app.route("/iifl/api/reports/export.csv", methods=["GET"])
+def api_reports_export():
+    report = reports.build(request.args)
+    f = report["filters"]
+    name = f"iifl-trades-{f['from']}-to-{f['to']}{('-' + f['mode']) if f['mode'] else ''}.csv"
+    return app.response_class(
+        reports.to_csv(report),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 if __name__ == "__main__":

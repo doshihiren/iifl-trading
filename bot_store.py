@@ -5,7 +5,7 @@ import uuid
 import db
 
 BOT_FIELDS = {
-    "symbol", "tradingSymbol", "instrumentId", "exchange", "tick_size", "mode", "qty",
+    "symbol", "tradingSymbol", "instrumentId", "exchange", "tick_size", "mode", "qty", "qty_random_pct",
     "target", "timeframe", "product", "maxpos", "capital", "status", "last_entry_slot",
     "last_tick", "last_ltp", "last_order", "last_error", "deleted",
 }
@@ -32,9 +32,9 @@ def add_bot(bot):
     with db.tx() as c:
         c.execute(
             """INSERT INTO bots(bot_id, symbol, tradingSymbol, instrumentId, exchange, tick_size,
-                   mode, qty, target, timeframe, product, maxpos, capital, status,
+                   mode, qty, qty_random_pct, target, timeframe, product, maxpos, capital, status,
                    created_at, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 bot_id,
                 str(bot["symbol"]).upper(),
@@ -44,6 +44,7 @@ def add_bot(bot):
                 float(bot.get("tick_size") or 0.05),
                 bot.get("mode", "PAPER"),
                 int(bot.get("qty", 1)),
+                float(bot.get("qty_random_pct", 10)),
                 float(bot.get("target", 1.0)),
                 bot.get("timeframe", "15m"),
                 bot.get("product", "DELIVERY"),

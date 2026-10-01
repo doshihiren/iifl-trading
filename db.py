@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS bots (
     tick_size       REAL NOT NULL DEFAULT 0.05,
     mode            TEXT NOT NULL DEFAULT 'PAPER',
     qty             INTEGER NOT NULL DEFAULT 1,
+    qty_random_pct  REAL NOT NULL DEFAULT 10,
     target          REAL NOT NULL DEFAULT 1.0,
     timeframe       TEXT NOT NULL DEFAULT '15m',
     product         TEXT NOT NULL DEFAULT 'DELIVERY',
@@ -292,6 +293,7 @@ def init_db():
             _local.path = path
             _local.depth = 0
         c.executescript(SCHEMA)
+        _add_missing_columns(c)
         c.execute(
             "INSERT OR IGNORE INTO runtime_state(key, value, updated_at) VALUES('schema_version', ?, ?)",
             (json.dumps(SCHEMA_VERSION), now_utc()),
@@ -302,6 +304,19 @@ def init_db():
             pass
         _initialized_paths.add(path)
     migrate_from_json()
+
+
+# Columns added after the first release: (table, column, definition)
+LATER_COLUMNS = [
+    ("bots", "qty_random_pct", "REAL NOT NULL DEFAULT 10"),
+]
+
+
+def _add_missing_columns(c):
+    for table, column, definition in LATER_COLUMNS:
+        existing = {r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _legacy_status(status):

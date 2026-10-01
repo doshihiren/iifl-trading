@@ -41,10 +41,10 @@ BOT_DATA_FILE = os.getenv("BOT_DATA_FILE", "/root/iifl/data/bots.json")
 BOT_DB_FILE = os.getenv("BOT_DB_FILE", "/root/iifl/data/iifl.db")
 DATA_DIR = os.path.dirname(BOT_DB_FILE)
 
-# ---- LIVE safety limits -------------------------------------------------
-# Largest quantity a single LIVE order may carry. Starts at 1 so the first
-# live tests can only ever trade one share. Raise it in .env when ready.
-LIVE_MAX_QTY_PER_ORDER = env_int("LIVE_MAX_QTY_PER_ORDER", 1)
+# ---- LIVE order settings ------------------------------------------------
+# Order size comes from each bot's qty (+/- its random %). The per-bot capital
+# limit and GLOBAL_MAX_CAPITAL are the size brakes; LIVE_MAX_QTY_PER_ORDER in
+# .env is no longer used.
 
 # Send a short deterministic tag with every LIVE order so it can be matched
 # in the IIFL order book after a crash. Set false if IIFL rejects the field.

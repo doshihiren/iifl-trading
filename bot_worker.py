@@ -60,9 +60,9 @@ def main():
     db.init_db()
     engine = Engine()
     engine.startup()
-    log.info("event=WORKER_READY poll=%ss live_trading=%s ip_authorized=%s max_live_qty=%s",
+    log.info("event=WORKER_READY poll=%ss live_trading=%s ip_authorized=%s global_capital=%s",
              config.BOT_POLL_SECONDS, config.LIVE_TRADING, config.IIFL_TRADING_IP_AUTHORIZED,
-             config.LIVE_MAX_QTY_PER_ORDER)
+             config.GLOBAL_MAX_CAPITAL)
 
     while _running:
         started = time.monotonic()

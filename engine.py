@@ -24,6 +24,8 @@ order instantly at the current LTP.
 import hashlib
 import json
 import logging
+import math
+import random
 from datetime import datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 from zoneinfo import ZoneInfo
@@ -52,6 +54,23 @@ def ceil_to_tick(price, tick):
 def target_from_fill(fill_price, target_pct, tick):
     raw = Decimal(str(fill_price)) * (Decimal(1) + Decimal(str(target_pct)) / Decimal(100))
     return ceil_to_tick(raw, tick)
+
+
+_rng = random.SystemRandom()
+
+
+def qty_range(base_qty, random_pct):
+    """Smallest and largest quantity for base_qty +/- random_pct percent (never below 1)."""
+    base = int(base_qty)
+    pct = max(0.0, float(random_pct or 0))
+    low = max(1, math.ceil(base * (1 - pct / 100.0) - 1e-9))
+    high = max(low, math.floor(base * (1 + pct / 100.0) + 1e-9))
+    return low, high
+
+
+def randomized_qty(base_qty, random_pct, rng=None):
+    low, high = qty_range(base_qty, random_pct)
+    return (rng or _rng).randint(low, high)
 
 
 def order_tag(order_key):
@@ -303,8 +322,6 @@ class Engine:
             return "LIVE_TRADING is false in .env"
         if not config.IIFL_TRADING_IP_AUTHORIZED:
             return "IIFL_TRADING_IP_AUTHORIZED is false in .env"
-        if qty > config.LIVE_MAX_QTY_PER_ORDER:
-            return f"qty {qty} exceeds LIVE_MAX_QTY_PER_ORDER={config.LIVE_MAX_QTY_PER_ORDER}"
         if not self.session_ok:
             return "IIFL session not connected"
         return None
@@ -326,7 +343,8 @@ class Engine:
             return
 
         mode = bot["mode"]
-        qty = int(bot["qty"])
+        base_qty = int(bot["qty"])
+        qty = randomized_qty(base_qty, bot.get("qty_random_pct", 10))
         signal_key = f"{bot_id}|{slot}|BUY"
         order_key = signal_key
 
@@ -379,8 +397,9 @@ class Engine:
             if mode == "PAPER":
                 self._apply_fill(c, order_id, qty, ltp, [])
 
-        elog("SIGNAL", f"BUY signal {bot['symbol']} qty {qty} @~{ltp}", bot_id=bot_id,
-             symbol=bot["symbol"], slot=slot, ltp=ltp, mode=mode, store=(mode == "LIVE"))
+        elog("SIGNAL", f"BUY signal {bot['symbol']} qty {qty} (base {base_qty}) @~{ltp}", bot_id=bot_id,
+             symbol=bot["symbol"], slot=slot, ltp=ltp, qty=qty, base_qty=base_qty, mode=mode,
+             store=(mode == "LIVE"))
         if mode == "LIVE":
             self._send(order_id)
 
