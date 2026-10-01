@@ -14,7 +14,7 @@ force_ipv6()
 from instruments import InstrumentLookupError, find_instrument
 from market_data import MarketDataError, historical_candles, market_quote
 from orders import LiveTradingDisabled, build_sbc_test_order, place_sbc_test_order
-from bot_store import list_bots, upsert_bot, remove_bot, list_trades, update_bot
+from bot_store import add_bot, list_bots, remove_bot, list_trades, update_bot
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32).hex()
@@ -519,7 +519,7 @@ def api_bots_save():
     if quantity <= 0 or target <= 0 or maxpos <= 0 or capital <= 0:
         return jsonify({"status": "error", "message": "Bot settings must be greater than zero"}), 400
 
-    saved = upsert_bot({
+    saved = add_bot({
         "symbol": symbol,
         "tradingSymbol": instrument.get("tradingSymbol"),
         "instrumentId": str(instrument.get("instrumentId")),
@@ -541,26 +541,26 @@ def api_bots_save():
     })
 
 
-@app.route("/iifl/api/bots/<symbol>", methods=["DELETE"])
-def api_bots_delete(symbol):
-    removed = remove_bot(symbol)
+@app.route("/iifl/api/bots/<bot_id>", methods=["DELETE"])
+def api_bots_delete(bot_id):
+    removed = remove_bot(bot_id)
     return jsonify({
         "status": "Ok",
         "removed": removed
     })
 
 
-@app.route("/iifl/api/bots/<symbol>/start", methods=["POST"])
-def api_bot_start(symbol):
-    bot = update_bot(symbol, status="RUNNING", last_error=None)
+@app.route("/iifl/api/bots/<bot_id>/start", methods=["POST"])
+def api_bot_start(bot_id):
+    bot = update_bot(bot_id, status="RUNNING", last_error=None, pending_order=None)
     if not bot:
         return jsonify({"status": "error", "message": "Bot not found"}), 404
     return jsonify({"status": "Ok", "result": bot})
 
 
-@app.route("/iifl/api/bots/<symbol>/stop", methods=["POST"])
-def api_bot_stop(symbol):
-    bot = update_bot(symbol, status="STOPPED")
+@app.route("/iifl/api/bots/<bot_id>/stop", methods=["POST"])
+def api_bot_stop(bot_id):
+    bot = update_bot(bot_id, status="STOPPED")
     if not bot:
         return jsonify({"status": "error", "message": "Bot not found"}), 404
     return jsonify({"status": "Ok", "result": bot})
