@@ -1,0 +1,17 @@
+[Unit]
+Description=IIFL trading worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+WorkingDirectory=/root/iifl
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/root/iifl/venv/bin/python /root/iifl/bot_worker.py
+Restart=always
+RestartSec=5
+# Give an in-flight broker call time to finish before stopping.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
