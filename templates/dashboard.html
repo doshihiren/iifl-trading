@@ -71,7 +71,7 @@
       <h2 style="margin-top:8px">Active Bots</h2>
       <div style="overflow:auto">
         <table>
-          <thead><tr><th>Symbol</th><th>Mode</th><th>Qty</th><th>Target</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Symbol</th><th>Mode</th><th>Qty</th><th>Target</th><th>Status</th><th>Last Tick</th><th></th></tr></thead>
           <tbody id="bots"><tr id="emptyRow"><td colspan="6" class="empty">No bots added yet.</td></tr></tbody>
         </table>
       </div>
@@ -175,15 +175,47 @@ async function removeBot(symbol){
   }
 }
 
+
+async function startBot(symbol){
+  try{
+    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(symbol)+'/start',{method:'POST'});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.message || 'Could not start bot');
+    await loadBots();
+  }catch(e){
+    document.getElementById('status').textContent=e.message || 'Could not start bot.';
+  }
+}
+
+async function stopBot(symbol){
+  try{
+    const r=await fetch('/iifl/api/bots/'+encodeURIComponent(symbol)+'/stop',{method:'POST'});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.message || 'Could not stop bot');
+    await loadBots();
+  }catch(e){
+    document.getElementById('status').textContent=e.message || 'Could not stop bot.';
+  }
+}
+
 function renderBots(){
   const tbody=document.getElementById('bots'); tbody.innerHTML='';
-  if(!bots.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No bots added yet.</td></tr>'}
+  if(!bots.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No bots added yet.</td></tr>'}
   bots.forEach(b=>{
     const tr=document.createElement('tr');
+    const running=(b.status==='RUNNING' || b.status==='ACTION_REQUIRED');
+    const actionBtn = running
+      ? '<button class="secondary" onclick="stopBot(\''+b.symbol+'\')">Stop</button>'
+      : '<button class="start" onclick="startBot(\''+b.symbol+'\')">Start</button>';
+    const pending = b.pending_order
+      ? '<div class="meta">'+String(b.pending_order.side)+' pending • '+String(b.pending_order.quantity)+' qty</div>'
+      : '';
+    const err = b.last_error ? '<div class="meta" style="color:#ff9da4">'+String(b.last_error)+'</div>' : '';
     tr.innerHTML='<td><b>'+b.symbol+'</b><div class="meta">'+b.timeframe+' • '+b.product+'</div></td>'+
       '<td><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+b.mode+'</span></td>'+
-      '<td>'+b.qty+'</td><td>'+b.target+'%</td><td><span class="pill">'+(b.status || 'READY')+'</span></td>'+
-      '<td><button class="danger" onclick="removeBot(\''+b.symbol+'\')">Remove</button></td>';
+      '<td>'+b.qty+'</td><td>'+b.target+'%</td><td><span class="pill">'+(b.status || 'READY')+'</span>'+pending+err+'</td>'+
+      '<td><span class="meta">'+(b.last_tick || '-')+'</span></td>'+
+      '<td>'+actionBtn+' <button class="danger" onclick="removeBot(\''+b.symbol+'\')">Remove</button></td>';
     tbody.appendChild(tr);
   });
   document.getElementById('botCount').textContent=bots.length;
@@ -222,6 +254,7 @@ async function loadReports(){
 loadBots();
 loadReports();
 setInterval(loadReports, 15000);
+setInterval(loadBots, 5000);
 </script>
 </body>
 </html>
