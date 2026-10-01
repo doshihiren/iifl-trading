@@ -157,6 +157,12 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(eng.target_from_fill(1234.5, 0.5, 0.05), 1240.70)  # 1240.6725 -> 1240.70
         self.assertEqual(eng.target_from_fill(58.0, 1.0, 0.01), 58.58)
 
+    def test_qty_range(self):
+        self.assertEqual(eng.qty_range(125, 10), (113, 137))
+        self.assertEqual(eng.qty_range(1, 10), (1, 1))
+        self.assertEqual(eng.qty_range(10, 10), (9, 11))
+        self.assertEqual(eng.qty_range(50, 0), (50, 50))
+
     def test_slots(self):
         t = datetime(2026, 10, 5, 10, 7, 12, tzinfo=IST)
         self.assertEqual(eng.current_slot("1m", t), "2026-10-05T10:07")
@@ -379,11 +385,27 @@ class TestLive(Base):
         self.tick()
         self.assertEqual(self.broker.placed, [])
 
-    def test_live_qty_cap(self):
-        bid = self.add_bot(qty=50)
+    def test_random_qty_within_ten_percent(self):
+        bid = self.add_bot(qty=125, capital=10_000_000, maxpos=500)
+        self.broker.auto_fill_price = 59.0
+        seen = set()
+        for _ in range(40):
+            self.tick()
+            self.now += timedelta(minutes=1)
+        for payload in self.broker.placed:
+            q = int(payload[0]["quantity"])
+            self.assertTrue(113 <= q <= 137, q)
+            seen.add(q)
+        self.assertGreater(len(seen), 5)          # really varies
+        lots = self.lots(bid)
+        filled = db.rows("SELECT filled_qty FROM orders WHERE side='BUY' AND state='FILLED'")
+        self.assertEqual(sorted(l["quantity"] for l in lots), sorted(o["filled_qty"] for o in filled))
+
+    def test_capital_limit_is_the_size_brake(self):
+        bid = self.add_bot(qty=125, capital=5000)    # 125 x 59 = 7375 > 5000
         self.tick()
         self.assertEqual(self.broker.placed, [])
-        self.assertIn("LIVE_MAX_QTY_PER_ORDER", bot_store.get_bot(bid)["last_error"])
+        self.assertIn("capital", bot_store.get_bot(bid)["last_error"])
 
     def test_stop_keeps_managing_exits(self):
         bid = self.add_bot()
@@ -417,3 +439,27 @@ class TestLive(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReports(Base):
+    def test_grouping_and_stats(self):
+        import reports
+        live = self.add_bot(mode="LIVE")
+        paper = self.add_bot(mode="PAPER")
+        rows = [(live, "LIVE", 59.0, 59.59, 1), (live, "LIVE", 60.0, 59.0, 2), (paper, "PAPER", 58.0, 58.58, 5)]
+        for bot_id, mode, entry, exit_, qty in rows:
+            t = bot_store.add_trade({"bot_id": bot_id, "symbol": "SBC", "quantity": qty, "entry_price": entry,
+                                     "target_price": entry * 1.01, "mode": mode})
+            bot_store.close_trade(t["id"], exit_price=exit_)
+        today = datetime.now(IST).date().isoformat()
+        r = reports.build({"from": today, "to": today, "group": "mode"})
+        self.assertEqual(r["summary"]["trades"], 3)
+        self.assertEqual(r["summary"]["gross_pnl"], round(0.59 - 2.0 + 2.9, 2))
+        self.assertEqual(r["compare"]["LIVE"]["trades"], 2)
+        self.assertEqual(r["compare"]["LIVE"]["wins"], 1)
+        self.assertEqual({g["key"] for g in r["groups"]}, {"LIVE", "PAPER"})
+        only_live = reports.build({"from": today, "to": today, "mode": "LIVE"})
+        self.assertEqual(only_live["summary"]["trades"], 2)
+        self.assertIn("gross_pnl", reports.to_csv(only_live).splitlines()[0])
+        old = reports.build({"from": "2026-01-01", "to": "2026-01-31"})
+        self.assertEqual(old["summary"]["trades"], 0)

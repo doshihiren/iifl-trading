@@ -77,7 +77,6 @@ Edit `/root/iifl/.env` (`nano /root/iifl/.env`) and make sure these lines exist:
 ```
 LIVE_TRADING=true
 IIFL_TRADING_IP_AUTHORIZED=true
-LIVE_MAX_QTY_PER_ORDER=1
 ```
 
 ```bash
@@ -95,7 +94,15 @@ Watch for, in order:
 
 Follow the worker live: `journalctl -u iifl-bot -f`
 
-Only after this works: raise `LIVE_MAX_QTY_PER_ORDER` in `.env`, restart both services, and add larger bots.
+Only after this works, add your real-size bots.
+
+## Order size
+
+Each entry uses the bot's qty ± its "Qty random %" (default 10%). Example: qty 125 → every order is a random whole number from 113 to 137. Set the random % to 0 for an exact qty. The bot's max capital and `GLOBAL_MAX_CAPITAL` are the size limits; `LIVE_MAX_QTY_PER_ORDER` is no longer used.
+
+## Reports
+
+Dashboard → **Reports** (or `/iifl/reports`): date range presets, LIVE/PAPER filter, script, bot, and grouping by day, week, month, script, bot, mode, timeframe, product or exit reason. Daily and cumulative P&L charts, LIVE vs PAPER comparison, open positions with unrealized P&L, and CSV download.
 
 ## Daily routine
 
