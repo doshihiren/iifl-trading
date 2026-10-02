@@ -277,6 +277,9 @@ def normalize_order_row(r):
 
 def normalize_trade_row(r):
     return {
+        "instrument_id": str(r.get("instrumentId") or ""),
+        "side": str(r.get("transactionType") or "").upper(),
+        "product": str(r.get("product") or "").upper(),
         "broker_order_id": str(r.get("brokerOrderId") or r.get("orderId") or ""),
         "trade_ref": str(r.get("exchangeTradeId") or r.get("tradeId") or ""),
         "qty": int(_num(r.get("filledQuantity") or r.get("quantity") or r.get("filledQty"))),

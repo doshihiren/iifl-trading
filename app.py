@@ -592,9 +592,9 @@ def api_bots_save():
     if timeframe not in {"1m", "5m", "15m"}:
         return jsonify({"status": "error", "message": "timeframe must be 1m, 5m or 15m"}), 400
 
-    mode = str(body.get("mode", "PAPER")).upper()
+    mode = str(body.get("mode", "LIVE")).upper()
     if mode not in {"PAPER", "LIVE"}:
-        return jsonify({"status": "error", "message": "mode must be PAPER or LIVE"}), 400
+        return jsonify({"status": "error", "message": "mode must be LIVE"}), 400
 
     product = str(body.get("product", "DELIVERY")).upper()
     if product not in {"DELIVERY", "INTRADAY"}:
@@ -804,9 +804,7 @@ def api_orders():
 
 @app.route("/iifl/api/reports/summary", methods=["GET"])
 def api_reports_summary():
-    mode = request.args.get("mode")
-    where = "WHERE mode=?" if mode in ("LIVE", "PAPER") else ""
-    params = (mode,) if where else ()
+    where, params = "WHERE mode='LIVE'", ()
     stats = db.row(
         f"""SELECT COUNT(*) AS trade_count,
                    SUM(CASE WHEN status IN ('OPEN','EXIT_SUBMITTED') THEN 1 ELSE 0 END) AS open_trades,
@@ -814,8 +812,17 @@ def api_reports_summary():
                    SUM(CASE WHEN status='CLOSED' AND pnl>0 THEN 1 ELSE 0 END) AS winning_trades,
                    SUM(CASE WHEN status='CLOSED' AND pnl<0 THEN 1 ELSE 0 END) AS losing_trades
             FROM trades {where}""", params)
-    trades = db.rows(f"SELECT * FROM trades {where} ORDER BY id DESC LIMIT 200", params)
-    trades.reverse()
+    # Open trades first (always all of them), then the latest closed ones.
+    open_rows = db.rows(f"SELECT * FROM trades {where} AND status!='CLOSED' ORDER BY id DESC", params)
+    closed_rows = db.rows(f"SELECT * FROM trades {where} AND status='CLOSED' ORDER BY closed_at DESC LIMIT 100", params)
+    ltp = {b["bot_id"]: b["last_ltp"] for b in db.rows("SELECT bot_id, last_ltp FROM bots")}
+    trades = []
+    for t in open_rows + closed_rows:
+        t["status_label"] = reports.status_label(t)
+        if t["status"] != "CLOSED" and ltp.get(t["bot_id"]):
+            t["ltp"] = ltp[t["bot_id"]]
+            t["unrealized"] = round((float(t["ltp"]) - float(t["entry_price"])) * int(t["quantity"]), 2)
+        trades.append(t)
 
     return jsonify({
         "status": "Ok",

@@ -72,7 +72,7 @@
         <div class="field"><label>Max open positions</label><input id="maxpos" type="number" value="10" min="1"></div>
         <div class="field"><label>Max capital</label><input id="capital" type="number" value="100000" min="1"></div>
         <div class="field"><label>Product</label><select id="product"><option selected>DELIVERY</option><option>INTRADAY</option></select></div>
-        <div class="field wide"><label>Mode</label><select id="mode"><option selected>PAPER</option><option>LIVE</option></select></div>
+        <input type="hidden" id="mode" value="LIVE">
       </div>
 
       <button class="start" style="width:100%" onclick="addBot()">Add Bot</button>
@@ -84,7 +84,7 @@
       <div class="stats">
         <div class="stat"><b id="botCount">0</b><span>Configured bots</span></div>
         <div class="stat"><b id="liveDeployed">₹0</b><span>LIVE deployed</span></div>
-        <div class="stat"><b id="paperDeployed">₹0</b><span>PAPER deployed</span></div>
+        <div class="stat"><b id="openLots">0</b><span>Open positions</span></div>
       </div>
       <h2 style="margin-top:8px">Active Bots</h2>
       <div style="overflow:auto">
@@ -98,7 +98,7 @@
 
 <div class="card" style="margin-top:18px">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h2>Trading Reports <a href="/iifl/reports" style="font-size:13px;color:var(--blue);margin-left:8px">Full reports →</a></h2>
-    <select id="reportMode" style="width:auto" onchange="loadReports()"><option value="">All modes</option><option>LIVE</option><option>PAPER</option></select></div>
+    </div>
   <div class="stats">
     <div class="stat"><b id="tradeCount">0</b><span>Total trades</span></div>
     <div class="stat"><b id="openTrades">0</b><span>Open trades</span></div>
@@ -106,8 +106,8 @@
   </div>
   <div style="overflow:auto">
     <table>
-      <thead><tr><th>Bot / Symbol</th><th>Mode</th><th>Entry time</th><th>Entry fill</th><th>Qty</th><th>Target</th><th>Exit time</th><th>Exit fill</th><th>Gross P&amp;L</th><th>Fees</th><th>Net P&amp;L</th><th>Broker buy / sell</th><th>Status</th></tr></thead>
-      <tbody id="tradeRows"><tr><td colspan="13" class="empty">No trade history yet.</td></tr></tbody>
+      <thead><tr><th>Bot / Symbol</th><th>Status</th><th>Entry time</th><th>Entry fill</th><th>Qty</th><th>Target</th><th>Exit time</th><th>Exit / LTP</th><th>P&amp;L</th><th>Broker buy / sell</th></tr></thead>
+      <tbody id="tradeRows"><tr><td colspan="10" class="empty">No LIVE trades yet.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -266,9 +266,9 @@ async function exitBot(botId, symbol){
 function renderBots(){
   const tbody=document.getElementById('bots'); tbody.innerHTML='';
   if(!bots.length){tbody.innerHTML='<tr><td colspan="9" class="empty">No bots added yet.</td></tr>'}
-  let live=0, paper=0;
+  let live=0, lots=0;
   bots.forEach(b=>{
-    if(b.mode==='LIVE') live+=Number(b.deployed_capital||0); else paper+=Number(b.deployed_capital||0);
+    live+=Number(b.deployed_capital||0); lots+=Number(b.open_positions||0);
     const tr=document.createElement('tr');
     const id=esc(b.bot_id), sym=esc(b.symbol);
     let btns='';
@@ -305,13 +305,12 @@ function renderBots(){
   });
   document.getElementById('botCount').textContent=bots.length;
   document.getElementById('liveDeployed').textContent='₹'+live.toLocaleString('en-IN',{maximumFractionDigits:0});
-  document.getElementById('paperDeployed').textContent='₹'+paper.toLocaleString('en-IN',{maximumFractionDigits:0});
+  document.getElementById('openLots').textContent=lots;
 }
 
 async function loadReports(){
   try{
-    const mode=document.getElementById('reportMode').value;
-    const r=await fetch('/iifl/api/reports/summary'+(mode?'?mode='+mode:''));
+    const r=await fetch('/iifl/api/reports/summary');
     const data=await r.json();
     const s=data.result || {};
     document.getElementById('tradeCount').textContent=s.trade_count || 0;
@@ -323,25 +322,23 @@ async function loadReports(){
     const trades=s.trades || [];
     tbody.innerHTML='';
     if(!trades.length){
-      tbody.innerHTML='<tr><td colspan="13" class="empty">No trade history yet.</td></tr>';
+      tbody.innerHTML='<tr><td colspan="10" class="empty">No LIVE trades yet.</td></tr>';
       return;
     }
-    trades.slice().reverse().forEach(t=>{
+    trades.forEach(t=>{
       const tr=document.createElement('tr');
       const closed=t.status==='CLOSED';
+      const st=t.status==='OPEN'?'background:#1b2a4a;color:#b9d2ff':t.status==='EXIT_SUBMITTED'?'background:#3d3115;color:#ffd98a':t.exit_reason==='MANUAL'?'background:#43232a;color:#ffc5ca':'';
       tr.innerHTML='<td>'+esc(t.symbol)+'<div class="meta">'+esc(t.bot_id || '')+'</div></td>'+
-        '<td><span class="pill '+(t.mode==='PAPER'?'paper':'')+'">'+esc(t.mode)+'</span></td>'+
+        '<td><span class="pill" style="'+st+'"'+(t.exit_note?' title="'+esc(t.exit_note)+'"':'')+'>'+esc(t.status_label||t.status)+'</span></td>'+
         '<td>'+tm(t.created_at)+'</td>'+
         '<td>'+px(t.entry_price)+'</td>'+
         '<td>'+esc(t.quantity)+'</td>'+
         '<td>'+px(t.target_price)+'</td>'+
         '<td>'+(closed?tm(t.closed_at):'-')+'</td>'+
-        '<td>'+(closed?px(t.exit_price):'-')+'</td>'+
-        '<td class="'+pnlCls(t.pnl)+'">'+(closed?money(t.pnl):'-')+'</td>'+
-        '<td>'+(t.fees==null?'-':money(t.fees))+'</td>'+
-        '<td>'+(t.net_pnl==null?'-':money(t.net_pnl))+'</td>'+
-        '<td><span class="meta">'+esc(t.broker_buy_order_id || '-')+' / '+esc(t.broker_sell_order_id || '-')+'</span></td>'+
-        '<td>'+esc(t.status)+(t.exit_reason&&closed?'<div class="meta">'+esc(t.exit_reason)+'</div>':'')+'</td>';
+        '<td>'+(closed?px(t.exit_price):(t.ltp?'<span class="meta">LTP</span> '+px(t.ltp):'-'))+'</td>'+
+        (closed?'<td class="'+pnlCls(t.pnl)+'">'+money(t.pnl)+'</td>':'<td class="'+pnlCls(t.unrealized)+'">'+(t.unrealized==null?'-':money(t.unrealized)+'<div class="meta">unrealized</div>')+'</td>')+
+        '<td><span class="meta">'+esc(t.broker_buy_order_id || '-')+' / '+esc(t.broker_sell_order_id || (t.exit_reason==='MANUAL'?'IIFL app':'-'))+'</span></td>';
       tbody.appendChild(tr);
     });
   }catch(e){}

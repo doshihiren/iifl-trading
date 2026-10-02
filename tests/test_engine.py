@@ -441,6 +441,66 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestManualExit(Base):
+    def setup_lots(self, n=2, qty=1):
+        bid = self.add_bot(qty=qty)
+        self.broker.auto_fill_price = 59.0
+        for _ in range(n):
+            self.tick(); self.tick()
+            self.now += timedelta(minutes=1)
+        bot_store.update_bot(bid, status="STOPPED")
+        return bid
+
+    def recon_ticks(self, n=4):
+        for _ in range(n):
+            self.engine.last_recon = None
+            self.tick(30)
+
+    def test_manual_exit_uses_trade_book_price(self):
+        bid = self.setup_lots(2)
+        self.broker.positions_rows = []                      # user sold both in IIFL app
+        self.broker.trades.append({"broker_order_id": "MAN1", "trade_ref": "X1", "qty": 2, "price": 59.80,
+                                   "time": "", "instrument_id": "6792", "side": "SELL", "product": "DELIVERY"})
+        self.recon_ticks()
+        lots = self.lots(bid)
+        self.assertEqual([l["status"] for l in lots], ["CLOSED", "CLOSED"])
+        self.assertEqual({l["exit_reason"] for l in lots}, {"MANUAL"})
+        self.assertEqual(lots[0]["exit_price"], 59.80)
+        self.assertEqual(lots[0]["pnl"], 0.8)
+        self.assertIn("trade book", lots[0]["exit_note"])
+        self.assertIsNone(bot_store.get_bot(bid)["last_error"])
+        self.assertEqual(db.scalar("SELECT COUNT(*) FROM orders WHERE side='SELL'"), 0)
+
+    def test_manual_exit_without_price_uses_ltp(self):
+        bid = self.setup_lots(1)
+        self.prices["6792"] = 58.70
+        self.broker.positions_rows = []
+        self.recon_ticks()
+        lot = self.lots(bid)[0]
+        self.assertEqual((lot["status"], lot["exit_price"]), ("CLOSED", 58.70))
+        self.assertIn("estimated", lot["exit_note"])
+
+    def test_partial_manual_exit_splits_lot(self):
+        bid = self.setup_lots(1, qty=3)
+        self.broker.positions_rows = [{"instrumentId": "6792", "product": "DELIVERY", "netQuantity": 1}]
+        self.recon_ticks()
+        closed = self.lots(bid, "CLOSED"); still = self.lots(bid, "OPEN")
+        self.assertEqual((closed[0]["quantity"], still[0]["quantity"]), (2, 1))
+
+    def test_no_false_alarm_while_buy_pending(self):
+        bid = self.add_bot(qty=1)
+        self.tick()                                         # BUY submitted, not filled
+        self.broker.positions_rows = []
+        self.recon_ticks(6)
+        self.assertEqual(db.scalar("SELECT COUNT(*) FROM trades WHERE exit_reason='MANUAL'"), 0)
+
+    def test_needs_several_checks(self):
+        bid = self.setup_lots(1)
+        self.broker.positions_rows = []
+        self.recon_ticks(1)
+        self.assertEqual(self.lots(bid)[0]["status"], "OPEN")
+
+
 class TestBatch(Base):
     def buys(self):
         return db.scalar("SELECT COUNT(*) FROM orders WHERE side='BUY' AND state='FILLED'")
@@ -496,24 +556,34 @@ class TestBatch(Base):
 
 
 class TestReports(Base):
-    def test_grouping_and_stats(self):
+    def test_live_only_with_open_and_manual(self):
         import reports
         live = self.add_bot(mode="LIVE")
         paper = self.add_bot(mode="PAPER")
-        rows = [(live, "LIVE", 59.0, 59.59, 1), (live, "LIVE", 60.0, 59.0, 2), (paper, "PAPER", 58.0, 58.58, 5)]
-        for bot_id, mode, entry, exit_, qty in rows:
+        def mk(bot_id, mode, entry, exit_=None, qty=1, reason="TARGET"):
             t = bot_store.add_trade({"bot_id": bot_id, "symbol": "SBC", "quantity": qty, "entry_price": entry,
-                                     "target_price": entry * 1.01, "mode": mode})
-            bot_store.close_trade(t["id"], exit_price=exit_)
+                                     "target_price": round(entry * 1.01, 2), "mode": mode})
+            if exit_ is not None:
+                bot_store.close_trade(t["id"], exit_price=exit_, exit_reason=reason)
+        mk(live, "LIVE", 59.0, 59.59)
+        mk(live, "LIVE", 60.0, 59.0, qty=2, reason="MANUAL")
+        mk(live, "LIVE", 58.0)                       # still open
+        mk(paper, "PAPER", 58.0, 58.58, qty=5)       # must not appear
+        bot_store.update_bot(live, last_ltp=58.5)
         today = datetime.now(IST).date().isoformat()
-        r = reports.build({"from": today, "to": today, "group": "mode"})
-        self.assertEqual(r["summary"]["trades"], 3)
-        self.assertEqual(r["summary"]["gross_pnl"], round(0.59 - 2.0 + 2.9, 2))
-        self.assertEqual(r["compare"]["LIVE"]["trades"], 2)
-        self.assertEqual(r["compare"]["LIVE"]["wins"], 1)
-        self.assertEqual({g["key"] for g in r["groups"]}, {"LIVE", "PAPER"})
-        only_live = reports.build({"from": today, "to": today, "mode": "LIVE"})
-        self.assertEqual(only_live["summary"]["trades"], 2)
-        self.assertIn("gross_pnl", reports.to_csv(only_live).splitlines()[0])
+        r = reports.build({"from": today, "to": today})
+        self.assertEqual(r["summary"]["trades"], 2)
+        self.assertEqual(r["summary"]["gross_pnl"], round(0.59 - 2.0, 2))
+        self.assertEqual(r["entries"]["count"], 3)
+        self.assertEqual(len(r["trades"]), 3)
+        labels = sorted(t["status_label"] for t in r["trades"])
+        self.assertEqual(labels, ["Exited manually (IIFL)", "Open", "Target hit"])
+        opened = [t for t in r["trades"] if t["status"] == "OPEN"][0]
+        self.assertEqual(opened["unrealized"], 0.5)
+        self.assertEqual({e["key"] for e in r["exits"]}, {"Target hit", "Exited manually (IIFL)"})
+        manual = reports.build({"from": today, "to": today, "status": "MANUAL"})
+        self.assertEqual(len(manual["trades"]), 1)
+        self.assertIn("status_label", reports.to_csv(r).splitlines()[0])
         old = reports.build({"from": "2026-01-01", "to": "2026-01-31"})
         self.assertEqual(old["summary"]["trades"], 0)
+        self.assertEqual(len(old["trades"]), 1)      # open trade is always listed

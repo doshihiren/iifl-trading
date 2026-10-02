@@ -796,6 +796,76 @@ class Engine:
                   (f"{o['side']} {state.lower()}: {reason}"[:500], ts, o["bot_id"]))
 
     # ---------- positions reconciliation ----------
+    def _manual_sell_price(self, iid, product):
+        """VWAP of today's SELL fills for this instrument that the bot did not place."""
+        try:
+            fills = self.broker.trade_book()
+        except self.broker.SessionExpired:
+            raise
+        except Exception as exc:
+            log.warning("event=TRADEBOOK_FAILED error=%s", exc)
+            return None
+        ours = {r["broker_order_id"] for r in db.rows(
+            "SELECT broker_order_id FROM orders WHERE broker_order_id IS NOT NULL")}
+        rows = [f for f in fills if f.get("instrument_id") == iid and f.get("side") == "SELL"
+                and f["broker_order_id"] not in ours and f["qty"] > 0 and f["price"] > 0
+                and (not f.get("product") or f["product"] == product)]
+        qty = sum(f["qty"] for f in rows)
+        return (sum(f["qty"] * f["price"] for f in rows) / qty) if qty else None
+
+    def close_manual_exits(self, iid, product, shortfall, now):
+        """IIFL holds fewer shares than the bot's open lots: the difference was sold
+        outside the bot. Close that many shares of lots (oldest first) as MANUAL."""
+        if shortfall <= 0:
+            return False
+        busy = db.scalar(
+            f"SELECT COUNT(*) FROM orders WHERE mode='LIVE' AND instrumentId=? AND product=? "
+            f"AND state IN ({','.join('?'*len(ACTIVE_ORDER_STATES))})", (iid, product, *ACTIVE_ORDER_STATES))
+        if busy:
+            return False     # an order is still working; wait until it settles
+        price = self._manual_sell_price(iid, product)
+        if price:
+            note = "Sold outside the bot (IIFL app/manual). Exit price from IIFL trade book."
+        else:
+            note = "Sold outside the bot (IIFL app/manual). Exit price not available from IIFL; estimated from last LTP."
+        ts = db.now_utc()
+        closed = []
+        with db.tx() as c:
+            lots = c.execute(
+                "SELECT t.*, b.last_ltp AS bot_ltp FROM trades t JOIN bots b ON b.bot_id=t.bot_id "
+                "WHERE t.mode='LIVE' AND t.status='OPEN' AND b.instrumentId=? AND t.product=? ORDER BY t.id",
+                (iid, product)).fetchall()
+            remaining = shortfall
+            for lot in lots:
+                if remaining <= 0:
+                    break
+                lot = dict(lot)
+                take = min(remaining, int(lot["quantity"]))
+                exit_px = float(price or lot["bot_ltp"] or lot["entry_price"])
+                pnl = _money((exit_px - float(lot["entry_price"])) * take)
+                c.execute("UPDATE trades SET quantity=?, exit_price=?, pnl=?, status='CLOSED', exit_reason='MANUAL', "
+                          "exit_note=?, closed_at=? WHERE id=?",
+                          (take, exit_px, pnl, note, ts, lot["id"]))
+                if take < int(lot["quantity"]):
+                    c.execute(
+                        """INSERT INTO trades(bot_id, symbol, side, quantity, entry_price, target_price, mode, product,
+                               timeframe, status, entry_order_id, broker_buy_order_id, pnl, created_at)
+                           VALUES(?,?,?,?,?,?,?,?,?,'OPEN',?,?,0,?)""",
+                        (lot["bot_id"], lot["symbol"], lot["side"], int(lot["quantity"]) - take, lot["entry_price"],
+                         lot["target_price"], lot["mode"], lot["product"], lot["timeframe"],
+                         lot["entry_order_id"], lot["broker_buy_order_id"], lot["created_at"]))
+                c.execute("UPDATE bots SET last_order=?, last_error=NULL, updated_at=? WHERE bot_id=?",
+                          (f"Exited manually: {take} @ {exit_px:.2f} P&L {pnl:+.2f}", ts, lot["bot_id"]))
+                bot = dict(c.execute("SELECT * FROM bots WHERE bot_id=?", (lot["bot_id"],)).fetchone())
+                self._batch_after_sell(c, bot, exit_px)
+                closed.append((lot, take, exit_px, pnl))
+                remaining -= take
+        for lot, take, exit_px, pnl in closed:
+            elog("MANUAL_EXIT", f"{lot['symbol']} lot {lot['id']}: {take} sh sold outside the bot @ {exit_px:.2f} "
+                 f"(P&L {pnl:+.2f}){'' if price else ' - price estimated'}", level="WARNING",
+                 bot_id=lot["bot_id"], symbol=lot["symbol"], lot=lot["id"])
+        return bool(closed)
+
     def reconcile_positions(self, now):
         groups = db.rows(
             """SELECT b.instrumentId AS iid, b.tradingSymbol AS tsym, t.product AS product,
@@ -831,7 +901,12 @@ class Engine:
                 elog("POSITION_MISMATCH",
                      f"{g['tsym']} {g['product']}: broker {bq} < bot lots {g['local_qty']}; new entries paused",
                      level="ERROR", symbol=g["tsym"])
+            if short and self.mismatch_counts[mkey] >= config.MANUAL_EXIT_CONFIRM_CHECKS:
+                if self.close_manual_exits(str(g["iid"]), g["product"], int(g["local_qty"]) - bq, now):
+                    self.mismatch_counts[mkey] = 0
+                    g = {**g, "local_qty": bq}
+                    short = False
             report.append({"symbol": g["tsym"], "product": g["product"], "broker_qty": bq,
-                           "bot_qty": int(g["local_qty"]), "mismatch": self.mismatch_counts[mkey] >= 2})
+                           "bot_qty": int(g["local_qty"]), "mismatch": short and self.mismatch_counts[mkey] >= 2})
         self.snapshot_at = now
         db.set_runtime("reconciliation", {"at": now.isoformat(), "rows": report})

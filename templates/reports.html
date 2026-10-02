@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>IIFL Trading Reports</title>
+  <title>IIFL LIVE Reports</title>
   <style>
     :root{--bg:#0b1020;--panel:#121a2e;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--grid:#1d2842;--blue:#6ea8fe;
       --profit:#3987e5;--loss:#e66767;--good:#32d583;--bad:#ff6b6b}
@@ -50,7 +50,7 @@
 <body>
 <div class="wrap">
   <div class="top">
-    <div><h1>Trading Reports</h1><p class="sub">Realized P&amp;L by the date a trade closed (IST) • open positions are always current</p></div>
+    <div><h1>LIVE Trading Reports</h1><p class="sub">Every trade the bot entered • realized P&amp;L counted on the day a trade closed (IST)</p></div>
     <a class="back" href="/iifl/">← Back to dashboard</a>
   </div>
 
@@ -64,7 +64,7 @@
     <div class="filters">
       <div class="f"><label>From</label><input type="date" id="from"></div>
       <div class="f"><label>To</label><input type="date" id="to"></div>
-      <div class="f"><label>Mode</label><select id="mode"><option value="">LIVE + PAPER</option><option>LIVE</option><option>PAPER</option></select></div>
+      <div class="f"><label>Status</label><select id="status"></select></div>
       <div class="f"><label>Script</label><select id="symbol"><option value="">All scripts</option></select></div>
       <div class="f"><label>Bot</label><select id="bot"><option value="">All bots</option></select></div>
       <div class="f"><label>Group by</label><select id="group"></select></div>
@@ -91,14 +91,12 @@
 
   <div class="two">
     <div class="card">
-      <h2>LIVE vs PAPER <span class="meta">(same dates, script &amp; bot filters)</span></h2>
-      <div class="scroll"><table class="cmp" id="compare"></table></div>
+      <h2>How trades exited <span class="meta">(closed in range)</span></h2>
+      <div class="scroll"><table id="exitTable"></table></div>
     </div>
     <div class="card">
-      <h2>LIVE order outcomes <span class="meta">(orders created in range)</span></h2>
+      <h2>Order outcomes at IIFL <span class="meta">(orders sent in range)</span></h2>
       <div class="chips" id="orderStats"></div>
-      <h2 style="margin-top:18px">Open positions now <span class="meta" id="openMeta"></span></h2>
-      <div class="scroll" style="max-height:260px"><table id="openTable"></table></div>
     </div>
   </div>
 
@@ -109,7 +107,7 @@
 
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px">
-      <h2 style="margin:0">Closed trades <span class="meta" id="tradeMeta"></span></h2>
+      <h2 style="margin:0">All bot trades <span class="meta" id="tradeMeta"></span></h2>
       <input id="search" placeholder="Search script, bot, order id…" oninput="renderTrades()" style="min-width:240px">
     </div>
     <div class="scroll"><table id="tradeTable"></table></div>
@@ -144,10 +142,10 @@ function setRange(r){
 }
 document.querySelectorAll('#quick button').forEach(b=>b.onclick=()=>setRange(b.dataset.r));
 ['from','to'].forEach(id=>$(id).addEventListener('change',()=>document.querySelectorAll('#quick button').forEach(b=>b.classList.remove('on'))));
-['mode','symbol','bot','group'].forEach(id=>$(id).addEventListener('change',load));
+['status','symbol','bot','group'].forEach(id=>$(id).addEventListener('change',load));
 
 function query(){
-  const p=new URLSearchParams({from:$('from').value,to:$('to').value,mode:$('mode').value,symbol:$('symbol').value,bot_id:$('bot').value,group:$('group').value||'day'});
+  const p=new URLSearchParams({from:$('from').value,to:$('to').value,status:$('status').value,symbol:$('symbol').value,bot_id:$('bot').value,group:$('group').value||'day'});
   return p.toString();
 }
 
@@ -158,7 +156,7 @@ async function load(){
   const r=await fetch('/iifl/api/reports/detail?'+q);
   if(r.status===401){location.href='/iifl/auth/login';return}
   R=(await r.json()).result;
-  fillSelects(); renderKpis(); renderCharts(); renderCompare(); renderOrders(); renderOpen(); renderGroups(); renderTrades();
+  fillSelects(); renderKpis(); renderCharts(); renderExits(); renderOrders(); renderGroups(); renderTrades();
 }
 
 function fillSelects(){
@@ -167,7 +165,8 @@ function fillSelects(){
   keep($('symbol'),R.symbols.map(s=>[s,s]),f.symbol,'<option value="">All scripts</option>');
   keep($('bot'),R.bots.map(b=>[b.bot_id,b.label+(b.deleted?' (removed)':'')]),f.bot_id,'<option value="">All bots</option>');
   keep($('group'),Object.entries(R.groups_available),f.group,'');
-  $('from').value=f.from; $('to').value=f.to; $('mode').value=f.mode;
+  keep($('status'),Object.entries(R.status_filters),f.status,'');
+  $('from').value=f.from; $('to').value=f.to;
 }
 
 function kpi(label,value,extra,c,hero){return '<div class="kpi'+(hero?' hero':'')+'"><b class="'+(c||'')+'">'+value+'</b><span>'+label+'</span>'+(extra?'<small>'+extra+'</small>':'')+'</div>'}
@@ -175,6 +174,7 @@ function renderKpis(){
   const s=R.summary,o=R.open;
   $('kpis').innerHTML=
     kpi('Realized P&L (gross)',signed(s.gross_pnl),s.net_pnl!=null?'Net after fees '+signed(s.net_pnl):'Fees not available from broker',cls(s.gross_pnl),true)+
+    kpi('Bot entries in range',R.entries.count.toLocaleString('en-IN'),R.entries.qty.toLocaleString('en-IN')+' shares • '+inr(R.entries.value,0))+
     kpi('Closed trades',s.trades.toLocaleString('en-IN'),s.qty.toLocaleString('en-IN')+' shares')+
     kpi('Win rate',s.win_rate+'%',s.wins+' wins • '+s.losses+' losses')+
     kpi('Avg P&L per trade',signed(s.avg_pnl),'Avg win '+inr(s.avg_win)+' • avg loss '+inr(s.avg_loss),cls(s.avg_pnl))+
@@ -275,29 +275,15 @@ function renderDailyTable(){
 function toggleTable(){const t=$('dailyTable'),c=$('dailyChart');const show=t.style.display==='none';t.style.display=show?'':'none';c.style.display=show?'none':''}
 let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>R&&renderCharts(),150)});
 
-function renderCompare(){
-  const L=R.compare.LIVE,P=R.compare.PAPER;
-  const row=(label,f)=>'<tr><td>'+label+'</td><td class="num">'+f(L)+'</td><td class="num">'+f(P)+'</td></tr>';
-  $('compare').innerHTML='<tr><th></th><th class="num"><span class="pill">LIVE</span></th><th class="num"><span class="pill paper">PAPER</span></th></tr>'+
-    row('Closed trades',s=>s.trades)+
-    row('Win rate',s=>s.win_rate+'% <span class="meta">('+s.wins+'/'+s.losses+')</span>')+
-    row('Gross P&L',s=>'<span class="'+cls(s.gross_pnl)+'">'+signed(s.gross_pnl)+'</span>')+
-    row('Avg per trade',s=>signed(s.avg_pnl))+
-    row('Best / worst',s=>signed(s.best)+' / '+signed(s.worst))+
-    row('Return on capital used',s=>(s.return_pct>0?'+':'')+s.return_pct+'%')+
-    row('Turnover',s=>inr(s.turnover,0))+
-    row('Avg holding',s=>hrs(s.avg_hold_hours));
+function renderExits(){
+  const rows=R.exits;
+  $('exitTable').innerHTML=rows.length?'<tr><th>Exit type</th><th class="num">Trades</th><th class="num">Shares</th><th class="num">Gross P&L</th><th class="num">Avg / trade</th></tr>'+
+    rows.map(r=>'<tr><td><b>'+esc(r.key)+'</b></td><td class="num">'+r.trades+'</td><td class="num">'+r.qty.toLocaleString('en-IN')+'</td><td class="num '+cls(r.gross_pnl)+'">'+signed(r.gross_pnl)+'</td><td class="num">'+signed(r.avg_pnl)+'</td></tr>').join(''):'<tr><td class="empty">No closed trades in this range.</td></tr>';
 }
 
 function renderOrders(){
   const e=Object.entries(R.order_stats);
   $('orderStats').innerHTML=e.length?e.sort().map(([k,v])=>'<span class="chip">'+esc(k)+': <b>'+v+'</b></span>').join(''):'<span class="meta">No LIVE orders in this range.</span>';
-}
-
-function renderOpen(){
-  const o=R.open; $('openMeta').textContent='('+o.count+' • unrealized '+signed(o.unrealized)+' at last LTP)';
-  $('openTable').innerHTML=o.rows.length?'<tr><th>Script</th><th>Mode</th><th class="num">Qty</th><th class="num">Entry</th><th class="num">Target</th><th class="num">LTP</th><th class="num">Unrealized</th><th class="num">Age</th></tr>'+
-    o.rows.map(r=>'<tr><td>'+esc(r.symbol)+'<div class="meta">'+esc(r.bot)+'</div></td><td><span class="pill '+(r.mode==='PAPER'?'paper':'')+'">'+esc(r.mode)+'</span></td><td class="num">'+r.qty+'</td><td class="num">'+px(r.entry)+'</td><td class="num">'+px(r.target)+'</td><td class="num">'+px(r.ltp)+'</td><td class="num '+cls(r.unrealized)+'">'+signed(r.unrealized)+'</td><td class="num">'+hrs(r.age_hours)+'</td></tr>').join(''):'<tr><td class="empty">No open positions.</td></tr>';
 }
 
 const GCOLS=[['key','',0],['trades','Trades',1],['qty','Shares',1],['wins','Wins',1],['losses','Losses',1],['win_rate','Win %',1],['gross_pnl','Gross P&L',1],['avg_pnl','Avg / trade',1],['best','Best',1],['worst','Worst',1],['turnover','Turnover',1],['return_pct','Return %',1],['avg_hold_hours','Avg hold',1]];
@@ -314,26 +300,38 @@ function renderGroups(){
 }
 function sortBy(t,k){const s=sortState[t];sortState[t]={k,d:s&&s.k===k?-s.d:-1};t==='g'?renderGroups():renderTrades()}
 
-const TCOLS=[['exit_time','Exit time'],['symbol','Script'],['mode','Mode'],['qty','Qty'],['entry_time','Entry time'],['entry','Entry fill'],['target','Target'],['exit','Exit fill'],['gross_pnl','Gross P&L'],['net_pnl','Net P&L'],['hold_hours','Held'],['exit_reason','Reason'],['broker_buy_order_id','Broker buy / sell']];
+const TCOLS=[['entry_time','Entry time'],['symbol','Script'],['qty','Qty'],['entry','Entry fill'],['target','Target'],['status_label','Status'],['exit_time','Exit time'],['exit','Exit / LTP'],['gross_pnl','P&L'],['hold_hours','Held'],['broker_buy_order_id','Broker buy / sell']];
+function statusPill(t){
+  const c=t.status==='OPEN'?'background:#1b2a4a;color:#b9d2ff':t.status==='EXIT_SUBMITTED'?'background:#3d3115;color:#ffd98a':
+    t.exit_reason==='MANUAL'?'background:#43232a;color:#ffc5ca':t.exit_reason==='MANUAL_EXIT'||t.exit_reason==='INTRADAY_SQUAREOFF'?'background:#2b2f45;color:#d3d8ef':'';
+  return '<span class="pill" style="'+c+'"'+(t.exit_note?' title="'+esc(t.exit_note)+'"':'')+'>'+esc(t.status_label)+'</span>'+
+    (t.exit_reason==='MANUAL'&&t.exit_note&&t.exit_note.includes('estimated')?'<div class="meta">price estimated</div>':'');
+}
 function renderTrades(){
   if(!R)return;
   const q=$('search').value.trim().toLowerCase();
-  let rows=R.trades.filter(t=>!q||[t.symbol,t.bot,t.broker_buy_order_id,t.broker_sell_order_id,t.exit_reason].join(' ').toLowerCase().includes(q));
+  let rows=R.trades.filter(t=>!q||[t.symbol,t.bot,t.broker_buy_order_id,t.broker_sell_order_id,t.status_label].join(' ').toLowerCase().includes(q));
   const st=sortState.t; if(st){rows.sort((a,b)=>{const x=a[st.k]??'',y=b[st.k]??'';return (x>y?1:x<y?-1:0)*st.d})}
-  $('tradeMeta').textContent='('+rows.length+(R.trades.length>=1000?' — latest 1000 shown, CSV has these too':'')+')';
-  if(!rows.length){$('tradeTable').innerHTML='<tr><td class="empty">No closed trades for these filters.</td></tr>';return}
-  const num=['qty','entry','target','exit','gross_pnl','net_pnl','hold_hours'];
+  const open=rows.filter(t=>t.status!=='CLOSED').length;
+  $('tradeMeta').textContent='('+rows.length+' • '+open+' open'+(R.trades.length>=2000?' — latest 2000 shown':'')+')';
+  if(!rows.length){$('tradeTable').innerHTML='<tr><td class="empty">No bot trades for these filters.</td></tr>';return}
+  const num=['qty','entry','target','exit','gross_pnl','hold_hours'];
   $('tradeTable').innerHTML='<tr>'+TCOLS.map(c=>'<th class="'+(num.includes(c[0])?'num':'')+'" onclick="sortBy(\'t\',\''+c[0]+'\')">'+c[1]+'</th>').join('')+'</tr>'+
-    rows.map(t=>'<tr><td>'+esc(t.exit_time)+'</td><td><b>'+esc(t.symbol)+'</b><div class="meta">'+esc(t.bot)+'</div></td><td><span class="pill '+(t.mode==='PAPER'?'paper':'')+'">'+esc(t.mode)+'</span></td>'+
-      '<td class="num">'+t.qty+'</td><td>'+esc(t.entry_time)+'</td><td class="num">'+px(t.entry)+'</td><td class="num">'+px(t.target)+'</td><td class="num">'+px(t.exit)+'</td>'+
-      '<td class="num '+cls(t.gross_pnl)+'">'+signed(t.gross_pnl)+'</td><td class="num">'+(t.net_pnl==null?'-':signed(t.net_pnl))+'</td><td class="num">'+hrs(t.hold_hours)+'</td>'+
-      '<td>'+esc(t.exit_reason)+'</td><td><span class="meta">'+esc(t.broker_buy_order_id||'-')+' / '+esc(t.broker_sell_order_id||'-')+'</span></td></tr>').join('');
+    rows.map(t=>{
+      const closed=t.status==='CLOSED';
+      const exitCell=closed?px(t.exit):(t.ltp?'<span class="meta">LTP</span> '+px(t.ltp):'-');
+      const pnlCell=closed?'<span class="'+cls(t.gross_pnl)+'">'+signed(t.gross_pnl)+'</span>':(t.unrealized==null?'-':'<span class="'+cls(t.unrealized)+'">'+signed(t.unrealized)+'</span><div class="meta">unrealized</div>');
+      return '<tr><td>'+esc(t.entry_time)+'</td><td><b>'+esc(t.symbol)+'</b><div class="meta">'+esc(t.bot)+'</div></td>'+
+      '<td class="num">'+t.qty+'</td><td class="num">'+px(t.entry)+'</td><td class="num">'+px(t.target)+'</td><td>'+statusPill(t)+'</td>'+
+      '<td>'+esc(t.exit_time||'-')+'</td><td class="num">'+exitCell+'</td><td class="num">'+pnlCell+'</td><td class="num">'+hrs(t.hold_hours)+'</td>'+
+      '<td><span class="meta">'+esc(t.broker_buy_order_id||'-')+' / '+esc(t.broker_sell_order_id||(t.exit_reason==='MANUAL'?'IIFL app':'-'))+'</span></td></tr>'}).join('');
 }
 
 // init from URL or default 30 days
 (function(){
   const p=new URLSearchParams(location.search);
-  if(p.get('from')){['from','to','mode'].forEach(k=>{if(p.get(k)!==null)$(k).value=p.get(k)});
+  if(p.get('from')){['from','to'].forEach(k=>{if(p.get(k)!==null)$(k).value=p.get(k)});
+    $('status').innerHTML='<option value="'+esc(p.get('status')||'')+'"></option>';
     $('symbol').innerHTML='<option value="'+esc(p.get('symbol')||'')+'"></option>';$('bot').innerHTML='<option value="'+esc(p.get('bot_id')||'')+'"></option>';
     $('group').innerHTML='<option value="'+esc(p.get('group')||'day')+'"></option>';load()}
   else setRange('30');

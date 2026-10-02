@@ -5,6 +5,8 @@
     python tools.py status            bots, open lots and pending orders from the database
     python tools.py broker-check      read-only: session, order book, trade book, positions, holdings
     python tools.py worker-dry-run    run one engine cycle in the foreground (stop the service first)
+    python tools.py purge-paper       show what PAPER data would be deleted
+    python tools.py purge-paper --yes back up the database, then delete all PAPER bots/trades/orders
 """
 
 import json
@@ -93,16 +95,62 @@ def cmd_worker_dry_run():
     cmd_status()
 
 
+def cmd_purge_paper():
+    import os
+    import sqlite3
+    from datetime import datetime
+
+    import config
+    db.init_db()
+    paper_bots = [r["bot_id"] for r in db.rows("SELECT bot_id FROM bots WHERE mode='PAPER'")]
+    counts = {
+        "bots": len(paper_bots),
+        "trades": db.scalar("SELECT COUNT(*) FROM trades WHERE mode='PAPER'"),
+        "orders": db.scalar("SELECT COUNT(*) FROM orders WHERE mode='PAPER'"),
+        "fills": db.scalar("SELECT COUNT(*) FROM fills WHERE order_id IN (SELECT id FROM orders WHERE mode='PAPER')"),
+        "signals": db.scalar(f"SELECT COUNT(*) FROM strategy_signals WHERE bot_id IN ({','.join('?'*len(paper_bots)) or 'NULL'})", paper_bots),
+    }
+    live = {"bots": db.scalar("SELECT COUNT(*) FROM bots WHERE mode='LIVE'"),
+            "trades": db.scalar("SELECT COUNT(*) FROM trades WHERE mode='LIVE'")}
+    print("PAPER data to delete:", counts)
+    print("LIVE data kept:     ", live)
+    if "--yes" not in sys.argv:
+        print("\nNothing deleted. Run again with --yes to delete.")
+        return
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = os.path.join(config.DATA_DIR, f"iifl-before-paper-purge-{stamp}.db")
+    src = sqlite3.connect(config.BOT_DB_FILE)
+    dst = sqlite3.connect(backup)
+    src.backup(dst)
+    dst.close(); src.close()
+    os.chmod(backup, 0o600)
+    print("Backup written:", backup)
+
+    marks = ",".join("?" * len(paper_bots)) or "NULL"
+    with db.tx() as c:
+        c.execute("DELETE FROM fills WHERE order_id IN (SELECT id FROM orders WHERE mode='PAPER')")
+        c.execute("DELETE FROM orders WHERE mode='PAPER'")
+        c.execute("DELETE FROM trades WHERE mode='PAPER'")
+        c.execute(f"DELETE FROM strategy_signals WHERE bot_id IN ({marks})", paper_bots)
+        c.execute(f"DELETE FROM events WHERE bot_id IN ({marks})", paper_bots)
+        c.execute("DELETE FROM bots WHERE mode='PAPER'")
+        db.add_event("PAPER_PURGE", f"Deleted PAPER data {counts}; backup {os.path.basename(backup)}")
+    print("PAPER data deleted. LIVE now:", {"bots": db.scalar("SELECT COUNT(*) FROM bots"),
+                                             "trades": db.scalar("SELECT COUNT(*) FROM trades")})
+
+
 COMMANDS = {
     "migrate": cmd_migrate,
     "refresh-ticks": cmd_refresh_ticks,
     "status": cmd_status,
     "broker-check": cmd_broker_check,
     "worker-dry-run": cmd_worker_dry_run,
+    "purge-paper": cmd_purge_paper,
 }
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         print(__doc__)
         sys.exit(1)
     COMMANDS[sys.argv[1]]()

@@ -108,6 +108,10 @@ Each entry uses the bot's qty ± its "Qty random %" (default 10%). Example: qty 
 - Max positions, capital limits, targets and exits work exactly as before.
 - Pressing **Start** on a stopped bot begins a fresh batch. **Edit** changes settings without removing the bot (new values apply to new entries).
 
+## Trades sold outside the bot (IIFL app)
+
+Every ~30 s the bot compares its open positions with IIFL. If IIFL shows fewer shares for 3 checks in a row and no bot order is working on that stock, the missing shares are marked **"Exited manually (IIFL)"**, oldest first. The exit price comes from IIFL's trade book when available, otherwise from the last LTP (marked "price estimated"). The bot then stops trying to sell those shares, and new entries resume.
+
 ## Reports
 
 Dashboard → **Reports** (or `/iifl/reports`): date range presets, LIVE/PAPER filter, script, bot, and grouping by day, week, month, script, bot, mode, timeframe, product or exit reason. Daily and cumulative P&L charts, LIVE vs PAPER comparison, open positions with unrealized P&L, and CSV download.

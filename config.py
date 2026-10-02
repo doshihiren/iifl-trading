@@ -67,5 +67,8 @@ UNKNOWN_ORDER_TIMEOUT_SECONDS = env_int("UNKNOWN_ORDER_TIMEOUT_SECONDS", 180)
 EXIT_RETRY_SECONDS = env_int("EXIT_RETRY_SECONDS", 60)
 EXIT_MAX_ATTEMPTS = env_int("EXIT_MAX_ATTEMPTS", 5)
 WORKER_STALE_SECONDS = env_int("WORKER_STALE_SECONDS", 60)
+# Consecutive reconciliation checks (RECON_SECONDS apart) that must show IIFL
+# holding fewer shares than the bot before lots are marked "exited manually".
+MANUAL_EXIT_CONFIRM_CHECKS = env_int("MANUAL_EXIT_CONFIRM_CHECKS", 3)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

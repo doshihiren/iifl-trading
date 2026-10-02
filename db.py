@@ -318,6 +318,7 @@ LATER_COLUMNS = [
     ("bots", "rebuy_ref_price", "REAL"),
     ("bots", "rebuy_trigger_price", "REAL"),
     ("orders", "batch_no", "INTEGER"),
+    ("trades", "exit_note", "TEXT"),
 ]
 
 
