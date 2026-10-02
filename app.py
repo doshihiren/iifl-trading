@@ -1,4 +1,5 @@
 import os
+import threading
 import hashlib
 import json
 import requests
@@ -243,7 +244,7 @@ def callback():
                 "message": "IIFL session request failed",
                 "http_status": response.status_code,
                 "response": result
-            }), 502
+            }), 424
 
         user_session = result.get("userSession")
 
@@ -273,7 +274,8 @@ def callback():
         <body>
             <h2>IIFL authentication successful</h2>
             <p>Trading API session created successfully.</p>
-            <p>You can close this window.</p>
+            <p>Taking you back to the dashboard…</p>
+            <script>setTimeout(function(){location.href='/iifl/'},1500)</script>
         </body>
         </html>
         """
@@ -400,7 +402,7 @@ def instrument_lookup(symbol):
         return jsonify({
             "status": "error",
             "message": str(e)
-        }), 502
+        }), 424
 
 
 @app.route("/iifl/market/quote")
@@ -418,7 +420,7 @@ def market_quote_route():
             return jsonify({
                 "status": "error",
                 "message": "IIFL login has expired. Click 'Login to IIFL' on the dashboard, then try again.",
-            }), 502
+            }), 424
         return jsonify({
             "status": "forwarded",
             "symbol": symbol.upper(),
@@ -763,11 +765,40 @@ def _age_seconds(iso_value):
         return None
 
 
+_session_check_lock = threading.Lock()
+
+
+def _refresh_session_state(max_age=90):
+    """Re-check the IIFL login from the web app when the stored result is old.
+
+    The worker only checks during market hours, so on holidays/weekends the
+    dashboard would otherwise keep showing yesterday's result."""
+    state = db.get_runtime("broker_session") or {}
+    age = _age_seconds(state.get("checked_at"))
+    if age is not None and age < max_age:
+        return state
+    if not _session_check_lock.acquire(blocking=False):
+        return state
+    try:
+        import broker
+        try:
+            broker.check_session()
+            state = {"state": "CONNECTED", "detail": "", "checked_at": db.now_utc()}
+        except broker.SessionExpired as exc:
+            state = {"state": "EXPIRED", "detail": str(exc)[:300], "checked_at": db.now_utc()}
+        except Exception as exc:
+            return {**state, "detail": f"Could not reach IIFL: {exc.__class__.__name__}"}
+        db.set_runtime("broker_session", state)
+        return state
+    finally:
+        _session_check_lock.release()
+
+
 @app.route("/iifl/api/system", methods=["GET"])
 def api_system():
     now = datetime.now(IST)
     session_file = load_session()
-    session_state = db.get_runtime("broker_session") or {}
+    session_state = _refresh_session_state() if session_file else (db.get_runtime("broker_session") or {})
     if not session_file or not session_file.get("user_session"):
         badge = "RECONNECT REQUIRED"
     elif session_state.get("state") == "EXPIRED":

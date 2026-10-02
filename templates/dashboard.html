@@ -41,7 +41,7 @@
       <a class="badge info" href="/iifl/reports" style="text-decoration:none">📊 Reports</a>
       <a class="badge info" href="/iifl/analysis" style="text-decoration:none">🔬 Analysis</a>
       <span id="sessionBadge" class="badge warn">SESSION …</span>
-      <a id="loginLink" class="badge info" href="/iifl/login" style="display:none;text-decoration:none">Login to IIFL</a>
+      <a id="loginLink" class="badge info" href="/iifl/login" style="text-decoration:none" title="IIFL ends API logins every night. Log in once each trading morning.">Login to IIFL</a>
       <span id="workerBadge" class="badge warn">WORKER …</span>
       <span id="marketBadge" class="badge info">MARKET …</span>
       <span id="liveBadge" class="badge warn">LIVE …</span>
@@ -355,7 +355,9 @@ async function loadSystem(){
     const s=(await readJson(r)).result || {};
     const sess=s.broker_session;
     setBadge('sessionBadge', 'IIFL: '+sess, sess==='CONNECTED'?'':(sess==='UNVERIFIED'?'warn':'bad'));
-    document.getElementById('loginLink').style.display = sess==='CONNECTED' ? 'none' : '';
+    const ll=document.getElementById('loginLink');
+    ll.textContent = sess==='CONNECTED' ? '↻ Re-login IIFL' : '🔑 Login to IIFL';
+    ll.className = 'badge ' + (sess==='CONNECTED' ? 'info' : 'warn');
     setBadge('workerBadge', 'WORKER '+s.worker, s.worker==='RUNNING'?'':'bad');
     setBadge('marketBadge', 'MARKET '+String(s.market||'').replace('_',' '), s.market==='OPEN'?'':'info');
     const liveOn = s.live_trading && s.ip_authorized;
