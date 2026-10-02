@@ -114,6 +114,13 @@ class FakeBroker:
 class Base(unittest.TestCase):
     def setUp(self):
         db.reset_connection()
+        config.BOT_DB_FILE = os.path.join(_TMP, os.path.basename(os.environ['BOT_DB_FILE']))
+        config.DATA_DIR = _TMP
+        config.LIVE_TRADING = True
+        config.IIFL_TRADING_IP_AUTHORIZED = True
+        config.GLOBAL_MAX_CAPITAL = 1000000.0
+        config.HOLIDAYS_FILE = os.path.join(_TMP, "holidays.json")
+        config.BOT_DATA_FILE = os.path.join(_TMP, "bots.json")
         db._initialized_paths.clear()
         for f in os.listdir(_TMP):
             os.remove(os.path.join(_TMP, f))

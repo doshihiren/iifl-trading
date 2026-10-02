@@ -5,6 +5,7 @@
     python tools.py status            bots, open lots and pending orders from the database
     python tools.py broker-check      read-only: session, order book, trade book, positions, holdings
     python tools.py worker-dry-run    run one engine cycle in the foreground (stop the service first)
+    python tools.py candles-check SBC show IIFL's raw 1-minute candle reply for the last trading day
     python tools.py purge-paper       show what PAPER data would be deleted
     python tools.py purge-paper --yes back up the database, then delete all PAPER bots/trades/orders
 """
@@ -95,6 +96,29 @@ def cmd_worker_dry_run():
     cmd_status()
 
 
+def cmd_candles_check():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import candles
+    import market_data
+    from instruments import find_instrument
+    symbol = sys.argv[2] if len(sys.argv) > 2 else "SBC"
+    inst = find_instrument(symbol)
+    day = candles.last_complete_day(datetime.now(ZoneInfo("Asia/Kolkata")))
+    status, body = market_data.historical_candles(inst["instrumentId"], exchange=inst.get("exchange", "NSEEQ"),
+                                                  timeframe="1m", from_date=day.strftime("%d-%b-%Y"),
+                                                  to_date=day.strftime("%d-%b-%Y"))
+    raw = json.dumps(body, default=str)
+    print(f"{symbol} {day} HTTP {status}; raw reply ({len(raw)} chars), first 1500 chars:")
+    print(raw[:1500])
+    parsed = candles.parse_candles(body)
+    print(f"\nParsed {len(parsed)} one-minute candles.")
+    if parsed:
+        print("first:", parsed[0])
+        print("last: ", parsed[-1])
+
+
 def cmd_purge_paper():
     import os
     import sqlite3
@@ -147,6 +171,7 @@ COMMANDS = {
     "broker-check": cmd_broker_check,
     "worker-dry-run": cmd_worker_dry_run,
     "purge-paper": cmd_purge_paper,
+    "candles-check": cmd_candles_check,
 }
 
 if __name__ == "__main__":

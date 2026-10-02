@@ -132,6 +132,33 @@ CREATE TABLE IF NOT EXISTS trades (
 CREATE INDEX IF NOT EXISTS ix_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS ix_trades_bot ON trades(bot_id);
 
+CREATE TABLE IF NOT EXISTS candles (
+    instrumentId TEXT NOT NULL,
+    ts           TEXT NOT NULL,          -- IST 'YYYY-MM-DD HH:MM' (1-minute candle start)
+    open         REAL NOT NULL,
+    high         REAL NOT NULL,
+    low          REAL NOT NULL,
+    close        REAL NOT NULL,
+    volume       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (instrumentId, ts)
+) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS analysis_symbols (
+    instrumentId  TEXT PRIMARY KEY,
+    symbol        TEXT NOT NULL,
+    tradingSymbol TEXT,
+    exchange      TEXT NOT NULL DEFAULT 'NSEEQ',
+    tick_size     REAL NOT NULL DEFAULT 0.05,
+    live          INTEGER NOT NULL DEFAULT 0,      -- 1 = add each day's candles at 17:00
+    sync_from     TEXT,                            -- requested history start (YYYY-MM-DD)
+    sync_requested INTEGER NOT NULL DEFAULT 0,     -- 1 = worker should (re)fetch the requested range
+    last_synced_day TEXT,                          -- last trading day fully fetched
+    sync_status   TEXT,
+    last_error    TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS runtime_state (
     key        TEXT PRIMARY KEY,
     value      TEXT,

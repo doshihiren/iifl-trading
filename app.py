@@ -19,6 +19,8 @@ import config
 import db
 import market_calendar
 import reports
+import backtest
+import candles as candle_store
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -857,6 +859,124 @@ def api_reports_export():
         mimetype="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+# ---------------------------------------------------------------- Analysis tab
+ANALYSIS_DURATIONS = {"1d": 1, "1w": 7, "1m": 31, "3m": 92}
+
+
+@app.route("/iifl/analysis")
+def analysis_page():
+    return render_template("analysis.html", dashboard_username=DASHBOARD_USERNAME)
+
+
+def _analysis_row(r):
+    cov = candle_store.coverage(r["instrumentId"])
+    last = db.row("SELECT close, ts FROM candles WHERE instrumentId=? ORDER BY ts DESC LIMIT 1", (r["instrumentId"],))
+    return {**r, "first": cov["first"], "last": cov["last"], "candles": cov["n"], "days": cov["days"],
+            "last_close": last["close"] if last else None}
+
+
+@app.route("/iifl/api/analysis/symbols", methods=["GET"])
+def api_analysis_symbols():
+    rows = db.rows("SELECT * FROM analysis_symbols ORDER BY symbol")
+    return jsonify({"status": "Ok", "result": [_analysis_row(r) for r in rows]})
+
+
+@app.route("/iifl/api/analysis/symbols", methods=["POST"])
+def api_analysis_add():
+    body = request.get_json(silent=True) or {}
+    symbol = str(body.get("symbol", "")).strip().upper()
+    duration = body.get("duration", "1m")
+    if not symbol or duration not in ANALYSIS_DURATIONS:
+        return jsonify({"status": "error", "message": "symbol and duration (1d/1w/1m/3m) are required"}), 400
+    try:
+        inst = find_instrument(symbol, exchange="NSEEQ")
+    except InstrumentLookupError as e:
+        return jsonify({"status": "error", "message": str(e)}), 404
+    live = 1 if body.get("live") else 0
+    now = datetime.now(IST)
+    end = candle_store.last_complete_day(now)
+    start = end.fromordinal(end.toordinal() - ANALYSIS_DURATIONS[duration] + 1)
+    iid = str(inst["instrumentId"])
+    ts = db.now_utc()
+    with db.tx() as c:
+        c.execute(
+            """INSERT INTO analysis_symbols(instrumentId, symbol, tradingSymbol, exchange, tick_size, live, sync_from,
+                   sync_requested, sync_status, last_error, created_at, updated_at)
+               VALUES(?,?,?,?,?,?,?,1,'Queued – the worker will fetch it shortly',NULL,?,?)
+               ON CONFLICT(instrumentId) DO UPDATE SET live=excluded.live, sync_from=excluded.sync_from,
+                   sync_requested=1, sync_status=excluded.sync_status, last_error=NULL, updated_at=excluded.updated_at""",
+            (iid, symbol, inst.get("tradingSymbol"), inst.get("exchange", "NSEEQ"), _tick_size(inst), live,
+             start.isoformat(), ts, ts))
+    db.add_event("ANALYSIS_ADD", f"{symbol}: fetch 1m candles from {start} ({'live' if live else 'once'})")
+    return jsonify({"status": "Ok", "result": _analysis_row(db.row("SELECT * FROM analysis_symbols WHERE instrumentId=?", (iid,)))})
+
+
+@app.route("/iifl/api/analysis/symbols/<iid>", methods=["PATCH"])
+def api_analysis_edit(iid):
+    body = request.get_json(silent=True) or {}
+    row = db.row("SELECT * FROM analysis_symbols WHERE instrumentId=?", (iid,))
+    if not row:
+        return jsonify({"status": "error", "message": "Not found"}), 404
+    changes = {}
+    if "live" in body:
+        changes["live"] = 1 if body["live"] else 0
+        if changes["live"] and not row["last_synced_day"]:
+            changes["last_synced_day"] = candle_store.last_complete_day(datetime.now(IST)).isoformat()
+    if body.get("resync"):
+        changes.update(sync_requested=1, sync_status="Queued – the worker will fetch it shortly", last_error=None)
+    if changes:
+        changes["updated_at"] = db.now_utc()
+        with db.tx() as c:
+            c.execute(f"UPDATE analysis_symbols SET {', '.join(k + '=?' for k in changes)} WHERE instrumentId=?",
+                      (*changes.values(), iid))
+    return jsonify({"status": "Ok", "result": _analysis_row(db.row("SELECT * FROM analysis_symbols WHERE instrumentId=?", (iid,)))})
+
+
+@app.route("/iifl/api/analysis/symbols/<iid>", methods=["DELETE"])
+def api_analysis_delete(iid):
+    with db.tx() as c:
+        c.execute("DELETE FROM candles WHERE instrumentId=?", (iid,))
+        n = c.execute("DELETE FROM analysis_symbols WHERE instrumentId=?", (iid,)).rowcount
+    return jsonify({"status": "Ok", "removed": bool(n)})
+
+
+@app.route("/iifl/api/analysis/run", methods=["POST"])
+def api_analysis_run():
+    body = request.get_json(silent=True) or {}
+    sym = db.row("SELECT * FROM analysis_symbols WHERE instrumentId=?", (str(body.get("instrumentId", "")),))
+    if not sym:
+        return jsonify({"status": "error", "message": "Choose a script that has data"}), 400
+    try:
+        params = {
+            "target_pct": float(body["target_pct"]),
+            "shares": int(body["shares"]),
+            "max_open": int(body["max_open"]),
+            "capital_limit": float(body["capital_limit"]) if body.get("capital_limit") not in (None, "", 0) else None,
+            "batch_size": int(body.get("batch_size") or 0),
+            "rebuy_dip_pct": float(body.get("rebuy_dip_pct") or 0),
+            "charges_pct": float(body.get("charges_pct") or 0),
+            "timeframe": body.get("timeframe", "15m"),
+            "tick": float(sym["tick_size"] or 0.05),
+        }
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"status": "error", "message": "Fill in target %, shares and max open entries"}), 400
+    if params["target_pct"] <= 0 or params["shares"] <= 0 or params["max_open"] <= 0 \
+            or params["timeframe"] not in backtest.TIMEFRAMES:
+        return jsonify({"status": "error", "message": "Target %, shares and max open entries must be above zero"}), 400
+    cov = candle_store.coverage(sym["instrumentId"])
+    if not cov["n"]:
+        return jsonify({"status": "error", "message": "No candles stored yet for this script"}), 400
+    d_from = (body.get("from") or cov["first"][:10])[:10]
+    d_to = (body.get("to") or cov["last"][:10])[:10]
+    data = candle_store.load(sym["instrumentId"], d_from, d_to)
+    if not data:
+        return jsonify({"status": "error", "message": f"No candles between {d_from} and {d_to}"}), 400
+    out = backtest.run(data, params)
+    out["meta"] = {"symbol": sym["symbol"], "from": data[0]["ts"], "to": data[-1]["ts"], "candles": len(data),
+                   "params": params}
+    return jsonify({"status": "Ok", "result": out})
 
 
 if __name__ == "__main__":

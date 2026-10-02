@@ -17,6 +17,7 @@ force_ipv6()
 
 import config  # noqa: E402
 import db  # noqa: E402
+from candles import SyncThread  # noqa: E402
 from engine import Engine  # noqa: E402
 
 _running = True
@@ -60,6 +61,8 @@ def main():
     db.init_db()
     engine = Engine()
     engine.startup()
+    candle_sync = SyncThread()   # Analysis-tab candle downloads, off the trading loop
+    candle_sync.start()
     log.info("event=WORKER_READY poll=%ss live_trading=%s ip_authorized=%s global_capital=%s",
              config.BOT_POLL_SECONDS, config.LIVE_TRADING, config.IIFL_TRADING_IP_AUTHORIZED,
              config.GLOBAL_MAX_CAPITAL)
@@ -73,6 +76,7 @@ def main():
         elapsed = time.monotonic() - started
         time.sleep(max(0.5, config.BOT_POLL_SECONDS - elapsed))
 
+    candle_sync.stop()
     log.info("event=WORKER_STOPPED")
 
 

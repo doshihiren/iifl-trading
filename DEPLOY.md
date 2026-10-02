@@ -112,6 +112,14 @@ Each entry uses the bot's qty ± its "Qty random %" (default 10%). Example: qty 
 
 Every ~30 s the bot compares its open positions with IIFL. If IIFL shows fewer shares for 3 checks in a row and no bot order is working on that stock, the missing shares are marked **"Exited manually (IIFL)"**, oldest first. The exit price comes from IIFL's trade book when available, otherwise from the last LTP (marked "price estimated"). The bot then stops trying to sell those shares, and new entries resume.
 
+## Analysis tab (strategy backtest)
+
+Dashboard → **🔬 Analysis**.
+1. Type a script, choose how much history (1 day / 1 week / 1 month / 3 months), choose **Just once** or **Live (daily 5 PM)**, then **Fetch 1-minute data**. The worker downloads it in the background; live scripts get each trading day's candles added after 17:00.
+2. Pick the script, timeframe, dates, target %, shares, max open entries, optional capital limit, batch settings and charges, then **Run analysis**. Results include a 1m / 5m / 15m comparison with the same settings.
+
+Check what IIFL returns for candles: `python tools.py candles-check SBC`
+
 ## Reports
 
 Dashboard → **Reports** (or `/iifl/reports`): date range presets, LIVE/PAPER filter, script, bot, and grouping by day, week, month, script, bot, mode, timeframe, product or exit reason. Daily and cumulative P&L charts, LIVE vs PAPER comparison, open positions with unrealized P&L, and CSV download.

@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Strategy Analysis</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#121a2e;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--grid:#1d2842;--blue:#6ea8fe;
+      --s1:#3987e5;--s2:#d95926;--profit:#3987e5;--loss:#e66767;--good:#32d583;--bad:#ff6b6b}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#08101f,#0f1730);font-family:Inter,system-ui,Arial,sans-serif;color:var(--text)}
+    .wrap{max-width:1400px;margin:auto;padding:24px 18px 60px}
+    .top{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap}
+    h1{font-size:26px;margin:0 0 4px}.sub{color:var(--muted);margin:0;font-size:14px}
+    .nav{display:flex;gap:16px}.nav a{color:var(--blue);text-decoration:none;font-weight:700;font-size:14px}
+    .card{background:rgba(18,26,46,.95);border:1px solid var(--line);border-radius:18px;padding:18px 20px;margin-bottom:16px}
+    h2{font-size:17px;margin:0 0 14px}.step{display:inline-block;background:#24365e;color:#cfe0ff;border-radius:999px;width:24px;height:24px;text-align:center;line-height:24px;font-size:13px;margin-right:8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end}
+    .f{display:flex;flex-direction:column;gap:6px;min-width:0}.f label{font-size:11px;color:var(--muted)}
+    .hint{font-size:11px;color:#b9d2ff;min-height:14px}
+    input,select{width:100%;background:#0d1528;color:var(--text);border:1px solid #30405f;border-radius:10px;padding:9px 11px;font-size:13px;outline:none;color-scheme:dark}
+    input:focus,select:focus{border-color:var(--blue)}
+    button{border:0;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer;font-size:13px}
+    .primary{background:var(--blue);color:#071225}.go{background:var(--good);color:#052718}.secondary{background:#202d49;color:var(--text)}.danger{background:#43232a;color:#ffc5ca}
+    .btn-sm{padding:6px 10px;font-size:12px;border-radius:8px}
+    .seg{display:flex;border:1px solid #30405f;border-radius:10px;overflow:hidden}.seg label{flex:1;text-align:center;padding:9px 6px;font-size:13px;cursor:pointer;color:var(--muted)}
+    .seg input{display:none}.seg label:has(input:checked){background:#24365e;color:#fff;font-weight:700}
+    table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+    th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+    th{color:var(--muted);font-weight:600;position:sticky;top:0;background:#121a2e}
+    td.num,th.num{text-align:right}.scroll{overflow:auto;max-height:480px}
+    .meta{color:var(--muted);font-size:12px}.pos{color:var(--good)}.neg{color:var(--bad)}.err{color:#ff9da4}
+    .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px}
+    .kpi{background:#0d1528;border:1px solid var(--line);border-radius:13px;padding:13px;min-width:0}
+    .kpi b{display:block;font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kpi span{color:var(--muted);font-size:11px}.kpi small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+    .hero{grid-column:span 2}.hero b{font-size:30px}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}.two>*{min-width:0}
+    .cmp td.best{background:rgba(57,135,229,.14);font-weight:700}.cmp th.sel{color:#fff}
+    .chart{position:relative;width:100%}.chart svg{display:block;width:100%}
+    .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin:-6px 0 8px}.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+    .tip{position:absolute;pointer-events:none;background:#0a1122;border:1px solid #33456b;border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.5;opacity:0;white-space:nowrap;z-index:5}
+    .pill{padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800;background:#183527;color:#8af0b6}.pill.wait{background:#3d3115;color:#ffd98a}.pill.off{background:#202d49;color:#c9d6f2}
+    .empty{color:var(--muted);text-align:center;padding:22px}
+    .note{font-size:12px;color:#aeb9d1;background:#0c1426;border:1px solid var(--line);padding:11px 13px;border-radius:10px;line-height:1.6}
+    #results{display:none}
+    @media(max-width:900px){.two{grid-template-columns:1fr}.hero{grid-column:auto}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>Strategy Analysis</h1><p class="sub">Test our bot rules on real 1-minute IIFL candles before risking money</p></div>
+    <div class="nav"><a href="/iifl/reports">📊 Reports</a><a href="/iifl/">← Dashboard</a></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">1</span>Get price data</h2>
+    <div class="grid">
+      <div class="f" style="grid-column:span 2"><label>NSE script</label>
+        <div style="display:flex;gap:8px"><input id="sym" placeholder="e.g. SBC, RELIANCE" autocomplete="off"><button class="primary" onclick="verify()">Verify</button></div>
+        <div class="hint" id="symInfo"></div></div>
+      <div class="f"><label>Past data</label><select id="duration"><option value="1d">1 day</option><option value="1w">1 week</option><option value="1m" selected>1 month</option><option value="3m">3 months</option></select><div class="hint"></div></div>
+      <div class="f"><label>Keep updating?</label><div class="seg"><label><input type="radio" name="live" value="0" checked>Just once</label><label><input type="radio" name="live" value="1">Live (daily 5 PM)</label></div><div class="hint"></div></div>
+      <div class="f"><label>&nbsp;</label><button class="go" onclick="fetchData()">Fetch 1-minute data</button><div class="hint" id="fetchMsg"></div></div>
+    </div>
+    <div class="scroll" style="margin-top:12px;max-height:300px"><table id="symTable"></table></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span>Strategy settings</h2>
+    <div class="grid">
+      <div class="f"><label>Script (with data)</label><select id="aSym"></select><div class="hint" id="aSymInfo"></div></div>
+      <div class="f"><label>Timeframe</label><select id="tf"><option>1m</option><option>5m</option><option selected>15m</option></select><div class="hint">All 3 are compared below</div></div>
+      <div class="f"><label>Start date</label><input type="date" id="from"><div class="hint"></div></div>
+      <div class="f"><label>End date</label><input type="date" id="to"><div class="hint"></div></div>
+      <div class="f"><label>Profit target %</label><input type="number" id="target" value="1" min="0.01" step="0.05"><div class="hint" id="targetInr"></div></div>
+      <div class="f"><label>Shares per entry</label><input type="number" id="shares" value="10" min="1" step="1"><div class="hint" id="entryValue"></div></div>
+      <div class="f"><label>Max open entries</label><input type="number" id="maxOpen" value="20" min="1" step="1"><div class="hint" id="fullCap"></div></div>
+      <div class="f"><label>Capital limit ₹ (blank = no limit)</label><input type="number" id="capital" min="0" step="1000" placeholder="no limit"><div class="hint"></div></div>
+      <div class="f"><label>Max buys per batch (0 = off)</label><input type="number" id="batch" value="0" min="0" step="1"><div class="hint"></div></div>
+      <div class="f"><label>Re-buy after drop % from last sell</label><input type="number" id="dip" value="1" min="0" step="0.05"><div class="hint">Used only when batch &gt; 0</div></div>
+      <div class="f"><label>Charges % per side (0 = gross)</label><input type="number" id="charges" value="0" min="0" step="0.01"><div class="hint">Delivery is roughly 0.1–0.15% per side</div></div>
+      <div class="f"><label>&nbsp;</label><button class="go" onclick="runAnalysis()">Run analysis</button><div class="hint err" id="runMsg"></div></div>
+    </div>
+  </div>
+
+  <div id="results">
+    <div class="card">
+      <h2 id="resTitle"></h2>
+      <div class="kpis" id="kpis"></div>
+    </div>
+
+    <div class="card">
+      <h2>1m vs 5m vs 15m <span class="meta">(same settings and dates • best value highlighted)</span></h2>
+      <div class="scroll"><table class="cmp" id="cmpTable"></table></div>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <h2>Profit over time</h2>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Booked profit</span><span><i style="background:var(--s2)"></i>Incl. open positions</span></div>
+        <div class="chart" id="eqChart"></div>
+      </div>
+      <div class="card">
+        <h2>Price during the test</h2>
+        <div class="chart" id="pxChart"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Day by day</h2>
+      <div class="scroll"><table id="dayTable"></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Simulated trades <span class="meta" id="tradeMeta"></span></h2>
+      <div class="scroll"><table id="tradeTable"></table></div>
+    </div>
+
+    <div class="note">
+      <b>How this test works.</b> It replays the bot's own rules on stored 1-minute candles: a buy at the start of every slot at that minute's open price, its own target per entry (rounded up to the tick size), no stop loss, positions held overnight, plus your max open entries, capital and batch limits.
+      A sale happens at the target price, or at the open if the price gaps above it. When 1-minute data can't tell which happened first, the test assumes the less favourable order.
+      Real fills can differ by a tick or two, and brokerage is only included through the charges % you enter. Past results don't guarantee future results.
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let SYMS=[], verified=null, RES=null;
+function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function inr(v,d=2){if(v===null||v===undefined||v==='')return '-';const n=Number(v);return (n<0?'-':'')+'₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d})}
+function signed(v){if(v===null||v===undefined)return '-';const n=Number(v);return (n>0?'+':'')+inr(n)}
+function cls(v){v=Number(v);return v>0?'pos':(v<0?'neg':'')}
+function px(v){return v===null||v===undefined?'-':Number(v).toFixed(2)}
+function hrs(h){if(h===null||h===undefined)return '-';h=Number(h);if(h<1)return Math.round(h*60)+' min';if(h<48)return h.toFixed(1)+' h';return (h/24).toFixed(1)+' days'}
+function dfmt(s){if(!s)return '-';const d=new Date(s.slice(0,10)+'T00:00:00');return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}
+async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){location.href='/iifl/auth/login';throw new Error('login')}const d=await r.json();if(!r.ok)throw new Error(d.message||'Request failed');return d.result}
+
+// ---------- step 1 ----------
+async function verify(){
+  const s=$('sym').value.trim().toUpperCase(); verified=null;
+  if(!s){$('symInfo').textContent='Type a script code';return}
+  $('symInfo').textContent='Checking with IIFL…';
+  try{
+    const r=await fetch('/iifl/market/quote?symbol='+encodeURIComponent(s)); const d=await r.json();
+    const q=d.iifl_response&&d.iifl_response.result&&d.iifl_response.result[0];
+    if(!r.ok||!q) throw new Error(d.message||'Not found');
+    verified=s; $('symInfo').textContent='✓ '+(d.instrument.tradingSymbol||s)+' • LTP ₹'+Number(q.ltp).toFixed(2);
+  }catch(e){$('symInfo').textContent='✗ '+e.message}
+}
+async function fetchData(){
+  const s=$('sym').value.trim().toUpperCase();
+  if(!s){$('fetchMsg').textContent='Enter a script first';return}
+  $('fetchMsg').textContent='Queuing…';
+  try{
+    await api('/iifl/api/analysis/symbols',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({symbol:s,duration:$('duration').value,live:document.querySelector('input[name=live]:checked').value==='1'})});
+    $('fetchMsg').textContent='Queued. The bot worker downloads it in the background (about 1 minute).';
+    loadSyms();
+  }catch(e){$('fetchMsg').textContent=e.message}
+}
+async function setLive(id,on){await api('/iifl/api/analysis/symbols/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({live:on})});loadSyms()}
+async function resync(id){await api('/iifl/api/analysis/symbols/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({resync:true})});loadSyms()}
+async function delSym(id,name){if(!confirm('Delete stored candles for '+name+'?'))return;await api('/iifl/api/analysis/symbols/'+id,{method:'DELETE'});loadSyms()}
+
+let pollTimer=null;
+async function loadSyms(){
+  try{SYMS=await api('/iifl/api/analysis/symbols')}catch(e){return}
+  const t=$('symTable');
+  if(!SYMS.length){t.innerHTML='<tr><td class="empty">No scripts yet. Add one above.</td></tr>'}
+  else t.innerHTML='<tr><th>Script</th><th>Data from</th><th>Data to</th><th class="num">Days</th><th class="num">Candles</th><th>Updates</th><th>Status</th><th></th></tr>'+
+    SYMS.map(s=>{
+      const st=s.sync_requested?'<span class="pill wait">Fetching…</span> ':'';
+      return '<tr><td><b>'+esc(s.symbol)+'</b></td><td>'+dfmt(s.first)+'</td><td>'+dfmt(s.last)+'</td><td class="num">'+s.days+'</td><td class="num">'+Number(s.candles).toLocaleString('en-IN')+'</td>'+
+      '<td><span class="pill '+(s.live?'':'off')+'">'+(s.live?'Live 5 PM':'Once')+'</span></td>'+
+      '<td style="white-space:normal;min-width:220px">'+st+'<span class="meta">'+esc(s.sync_status||'')+'</span>'+(s.last_error?'<div class="meta err">'+esc(s.last_error)+'</div>':'')+'</td>'+
+      '<td style="white-space:nowrap"><button class="secondary btn-sm" onclick="setLive(\''+esc(s.instrumentId)+'\','+(s.live?'false':'true')+')">'+(s.live?'Stop live':'Make live')+'</button> '+
+      '<button class="secondary btn-sm" onclick="resync(\''+esc(s.instrumentId)+'\')">Re-fetch</button> '+
+      '<button class="danger btn-sm" onclick="delSym(\''+esc(s.instrumentId)+'\',\''+esc(s.symbol)+'\')">Delete</button></td></tr>'}).join('');
+  const cur=$('aSym').value;
+  const ready=SYMS.filter(s=>s.candles>0);
+  $('aSym').innerHTML=ready.length?ready.map(s=>'<option value="'+esc(s.instrumentId)+'">'+esc(s.symbol)+'</option>').join(''):'<option value="">No data yet</option>';
+  if(cur && ready.some(s=>s.instrumentId===cur)) $('aSym').value=cur; else onSymChange(true);
+  updateHints();
+  clearTimeout(pollTimer); if(SYMS.some(s=>s.sync_requested)) pollTimer=setTimeout(loadSyms,5000);
+}
+function curSym(){return SYMS.find(s=>s.instrumentId===$('aSym').value)}
+function onSymChange(resetDates){
+  const s=curSym(); if(!s){$('aSymInfo').textContent='';return}
+  $('aSymInfo').textContent='Data '+dfmt(s.first)+' – '+dfmt(s.last)+' • last ₹'+px(s.last_close);
+  if(resetDates!==false){$('from').value=(s.first||'').slice(0,10);$('to').value=(s.last||'').slice(0,10)}
+  $('from').min=$('to').min=(s.first||'').slice(0,10); $('from').max=$('to').max=(s.last||'').slice(0,10);
+  updateHints();
+}
+$('aSym').addEventListener('change',()=>onSymChange(true));
+
+// ---------- step 2 hints ----------
+function updateHints(){
+  const s=curSym(); const price=s&&s.last_close?Number(s.last_close):null;
+  const pct=Number($('target').value)||0, sh=Math.max(0,Math.floor(Number($('shares').value)||0)), mo=Math.max(0,Math.floor(Number($('maxOpen').value)||0));
+  if(!price){['targetInr','entryValue','fullCap'].forEach(i=>$(i).textContent='');return}
+  $('targetInr').textContent='≈ ₹'+(price*pct/100).toFixed(2)+' per share • '+inr(price*pct/100*sh)+' per entry';
+  $('entryValue').textContent='One entry ≈ '+inr(price*sh,0)+' at ₹'+price.toFixed(2);
+  $('fullCap').textContent='All '+mo+' open ≈ '+inr(price*sh*mo,0)+' needed';
+}
+['target','shares','maxOpen'].forEach(i=>$(i).addEventListener('input',updateHints));
+
+// ---------- run ----------
+async function runAnalysis(){
+  const s=curSym(); if(!s){$('runMsg').textContent='Fetch data for a script first';return}
+  $('runMsg').textContent='Running…';
+  const body={instrumentId:s.instrumentId,timeframe:$('tf').value,from:$('from').value,to:$('to').value,
+    target_pct:$('target').value,shares:$('shares').value,max_open:$('maxOpen').value,capital_limit:$('capital').value,
+    batch_size:$('batch').value,rebuy_dip_pct:$('dip').value,charges_pct:$('charges').value};
+  try{RES=await api('/iifl/api/analysis/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});$('runMsg').textContent='';render()}
+  catch(e){$('runMsg').textContent=e.message}
+}
+
+function kpi(label,value,extra,c,hero){return '<div class="kpi'+(hero?' hero':'')+'"><b class="'+(c||'')+'">'+value+'</b><span>'+label+'</span>'+(extra?'<small>'+extra+'</small>':'')+'</div>'}
+function render(){
+  $('results').style.display='block';
+  const m=RES.meta, s=RES.result.summary, p=m.params;
+  $('resTitle').innerHTML=esc(m.symbol)+' • '+esc(s.timeframe)+' • '+dfmt(m.from)+' – '+dfmt(m.to)+' <span class="meta">('+s.trading_days+' trading days, '+Number(m.candles).toLocaleString('en-IN')+' one-minute candles)</span>';
+  $('kpis').innerHTML=
+    kpi('Booked profit'+(p.charges_pct?' (after charges)':''),signed(s.net_pnl),s.closed+' trades closed'+(s.charges?' • charges '+inr(s.charges):''),cls(s.net_pnl),true)+
+    kpi('Return on capital used',(s.return_on_peak_pct>0?'+':'')+s.return_on_peak_pct+'%','Booked profit ÷ peak capital',cls(s.return_on_peak_pct))+
+    kpi('Peak capital needed',inr(s.peak_capital,0),'Max '+s.max_open_seen+' entries open at once')+
+    kpi('Entries made',s.entries.toLocaleString('en-IN'),'Skipped: '+s.skipped_max_open+' max-open • '+s.skipped_capital+' capital'+(s.batches?' • '+s.skipped_batch_wait+' batch wait':''))+
+    kpi('Still open at end',s.open_count+' ('+s.open_qty+' sh)','Cost '+inr(s.open_invested,0)+' • '+signed(s.unrealized)+' at last price',cls(s.unrealized))+
+    kpi('Total incl. open',signed(s.total_pnl),(s.total_return_on_peak_pct>0?'+':'')+s.total_return_on_peak_pct+'% on peak capital',cls(s.total_pnl))+
+    kpi('Avg profit per trade',signed(s.avg_profit_per_trade),'Avg hold '+hrs(s.avg_hold_hours)+' • longest '+hrs(s.max_hold_hours),cls(s.avg_profit_per_trade))+
+    kpi('Avg booked per day',signed(s.avg_net_per_day),'Best day '+signed(s.best_day)+' • '+s.days_with_exits+'/'+s.trading_days+' days with sales',cls(s.avg_net_per_day))+
+    kpi('Worst dip in profit',s.max_drawdown?'-'+inr(s.max_drawdown):'₹0.00','Largest fall from a high, incl. open positions',s.max_drawdown?'neg':'')+
+    kpi('Stock moved',(s.price_change_pct>0?'+':'')+s.price_change_pct+'%','₹'+px(s.first_price)+' → ₹'+px(s.last_price),cls(s.price_change_pct))+
+    (s.oldest_open_hours!=null?kpi('Oldest open entry',hrs(s.oldest_open_hours),'Waiting for its target'):'');
+  renderCompare(); renderEq(); renderPx(); renderDays(); renderTrades();
+  $('results').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+const CMP=[['net_pnl','Booked profit','money',1],['return_on_peak_pct','Return on capital used','pct',1],['entries','Entries made','int',0],['closed','Trades closed','int',1],
+  ['avg_profit_per_trade','Avg profit per trade','money',1],['avg_hold_hours','Avg hold time','hrs',-1],['peak_capital','Peak capital needed','money0',-1],['max_open_seen','Max entries open at once','int',0],
+  ['open_count','Still open at end','int',-1],['unrealized','Open positions P&L','money',1],['total_pnl','Total incl. open','money',1],['max_drawdown','Worst dip in profit','dd',-1],['avg_net_per_day','Avg booked per day','money',1],
+  ['skipped_max_open','Entries skipped (max open)','int',0],['skipped_capital','Entries skipped (capital)','int',0]];
+function fmtv(t,v){if(v===null||v===undefined)return '-';if(t==='money')return '<span class="'+cls(v)+'">'+signed(v)+'</span>';if(t==='money0')return inr(v,0);if(t==='dd')return Number(v)?'<span class="neg">-'+inr(v)+'</span>':'₹0.00';if(t==='pct')return (v>0?'+':'')+v+'%';if(t==='hrs')return hrs(v);return Number(v).toLocaleString('en-IN')}
+function renderCompare(){
+  const c=RES.compare, tfs=['1m','5m','15m'], sel=RES.result.summary.timeframe;
+  $('cmpTable').innerHTML='<tr><th></th>'+tfs.map(t=>'<th class="num'+(t===sel?' sel':'')+'">'+t+(t===sel?' ●':'')+'</th>').join('')+'</tr>'+
+    CMP.map(([k,label,type,dir])=>{
+      const vals=tfs.map(t=>c[t][k]);
+      let best=null; if(dir!==0){const nums=vals.map(v=>v==null?null:Number(v)).filter(v=>v!=null); if(nums.length){best=dir>0?Math.max(...nums):Math.min(...nums); if(nums.every(v=>v===best)) best=null}}
+      return '<tr><td>'+label+'</td>'+vals.map(v=>'<td class="num'+(best!==null&&Number(v)===best?' best':'')+'">'+fmtv(type,v)+'</td>').join('')+'</tr>'}).join('');
+}
+
+// ---------- charts ----------
+const tip=document.createElement('div');tip.className='tip';document.body.appendChild(tip);
+function showTip(h,x,y){tip.innerHTML=h;tip.style.opacity=1;const w=tip.offsetWidth;tip.style.left=Math.min(window.innerWidth-w-10,x+14)+'px';tip.style.top=(y+window.scrollY-10)+'px'}
+function hideTip(){tip.style.opacity=0}
+function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw)));const n=raw/p;return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p}
+function niceDomain(mn,mx,zero){if(zero){mn=Math.min(0,mn);mx=Math.max(0,mx)}if(mn===mx){mx=mn+1;mn=mn-1}const st=niceStep((mx-mn)/4);return [Math.floor(mn/st-1e-9)*st,Math.ceil(mx/st-1e-9)*st,st]}
+function axisY(W,H,m,lo,hi,st,fmt){let g='';for(let v=lo;v<=hi+st/2;v+=st){const y=m.t+(H-m.t-m.b)*(1-(v-lo)/(hi-lo));g+='<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y+'" y2="'+y+'" stroke="var(--grid)"/><text x="'+(m.l-8)+'" y="'+(y+4)+'" fill="var(--muted)" font-size="11" text-anchor="end">'+fmt(v,st)+'</text>'}return g}
+function axisX(labels,x,H,m){const n=labels.length,every=Math.max(1,Math.ceil(n/7));let g='';labels.forEach((l,i)=>{if(i%every===0)g+='<text x="'+x(i)+'" y="'+(H-m.b+16)+'" fill="var(--muted)" font-size="11" text-anchor="middle">'+l+'</text>'});return g}
+const rupee=(v,st)=>(v<0?'-':'')+'₹'+Math.abs(v).toLocaleString('en-IN',{maximumFractionDigits:st<1?2:0});
+function shortDay(d){return new Date(d.slice(0,10)+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short'})}
+
+function lineChart(el,series,labels,tipFn,zero){
+  const W=el.clientWidth||600,H=250,m={l:70,r:14,t:12,b:28};
+  const all=series.flatMap(s=>s.values);
+  const [lo,hi,st]=niceDomain(Math.min(...all),Math.max(...all),zero);
+  const n=labels.length;
+  const x=i=>n===1?(W+m.l-m.r)/2:m.l+(W-m.l-m.r)*i/(n-1), y=v=>m.t+(H-m.t-m.b)*(1-(v-lo)/(hi-lo));
+  let g=axisY(W,H,m,lo,hi,st,rupee);
+  if(zero&&lo<0&&hi>0) g+='<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y(0)+'" y2="'+y(0)+'" stroke="#5b6b8e"/>';
+  series.forEach(s=>{g+='<polyline points="'+s.values.map((v,i)=>x(i)+','+y(v)).join(' ')+'" fill="none" stroke="'+s.color+'" stroke-width="2" stroke-linejoin="round"/>';
+    if(n===1) g+='<circle cx="'+x(0)+'" cy="'+y(s.values[0])+'" r="4" fill="'+s.color+'"/>'});
+  g+=axisX(labels.map(l=>l.label),x,H,m);
+  g+='<line class="xh" y1="'+m.t+'" y2="'+(H-m.b)+'" stroke="#5b6b8e" stroke-dasharray="3 3" opacity="0"/>';
+  series.forEach((s,k)=>{g+='<circle class="dot'+k+'" r="5" fill="'+s.color+'" stroke="#121a2e" stroke-width="2" opacity="0"/>'});
+  g+='<rect class="hit" x="'+m.l+'" y="'+m.t+'" width="'+(W-m.l-m.r)+'" height="'+(H-m.t-m.b)+'" fill="transparent"/>';
+  el.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" height="'+H+'" role="img">'+g+'</svg>';
+  const svg=el.querySelector('svg'),hit=el.querySelector('.hit'),xh=el.querySelector('.xh');
+  hit.addEventListener('mousemove',e=>{const b=svg.getBoundingClientRect(),sx=(e.clientX-b.left)*W/b.width;
+    const i=n===1?0:Math.max(0,Math.min(n-1,Math.round((sx-m.l)/((W-m.l-m.r)/(n-1)))));
+    xh.setAttribute('x1',x(i));xh.setAttribute('x2',x(i));xh.setAttribute('opacity',1);
+    series.forEach((s,k)=>{const d=el.querySelector('.dot'+k);d.setAttribute('cx',x(i));d.setAttribute('cy',y(s.values[i]));d.setAttribute('opacity',1)});
+    showTip(tipFn(i),e.clientX,e.clientY)});
+  hit.addEventListener('mouseleave',()=>{hideTip();xh.setAttribute('opacity',0);series.forEach((s,k)=>el.querySelector('.dot'+k).setAttribute('opacity',0))});
+}
+function renderEq(){
+  const d=RES.result.days;
+  lineChart($('eqChart'),[{color:'var(--s1)',values:d.map(r=>r.realized_cum)},{color:'var(--s2)',values:d.map(r=>r.equity)}],
+    d.map(r=>({label:shortDay(r.day)})),
+    i=>'<b>'+dfmt(d[i].day)+'</b><br>Booked profit <b>'+signed(d[i].realized_cum)+'</b><br>Incl. open positions <b>'+signed(d[i].equity)+'</b><br>'+d[i].open_count+' open • '+inr(d[i].invested,0)+' invested',true);
+}
+function renderPx(){
+  const p=RES.result.price;
+  lineChart($('pxChart'),[{color:'var(--s1)',values:p.map(r=>r.close)}],
+    p.map(r=>({label:shortDay(r.ts)})), i=>'<b>'+esc(p[i].ts)+'</b><br>₹'+px(p[i].close),false);
+}
+let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{if(RES){renderEq();renderPx()}},150)});
+
+function renderDays(){
+  const d=RES.result.days.slice().reverse();
+  $('dayTable').innerHTML='<tr><th>Date</th><th class="num">Close</th><th class="num">Entries</th><th class="num">Sales</th><th class="num">Booked that day</th><th class="num">Booked so far</th><th class="num">Open at close</th><th class="num">Invested</th><th class="num">Open P&L</th></tr>'+
+    d.map(r=>'<tr><td>'+dfmt(r.day)+'</td><td class="num">'+px(r.close)+'</td><td class="num">'+r.entries+'</td><td class="num">'+r.exits+'</td><td class="num '+cls(r.net)+'">'+signed(r.net)+'</td><td class="num">'+signed(r.realized_cum)+'</td><td class="num">'+r.open_count+'</td><td class="num">'+inr(r.invested,0)+'</td><td class="num '+cls(r.unrealized)+'">'+signed(r.unrealized)+'</td></tr>').join('');
+}
+function renderTrades(){
+  const t=RES.result.trades, show=t.slice(0,500);
+  $('tradeMeta').textContent='('+t.length+(t.length>500?' • newest 500 shown':'')+')';
+  if(!t.length){$('tradeTable').innerHTML='<tr><td class="empty">No entries were made with these settings.</td></tr>';return}
+  $('tradeTable').innerHTML='<tr><th>Bought</th><th class="num">Buy price</th><th class="num">Shares</th><th class="num">Target</th><th>Status</th><th>Sold</th><th class="num">Sell price</th><th class="num">Profit</th><th class="num">Held</th></tr>'+
+    show.map(r=>'<tr><td>'+esc(r.entry_ts)+'</td><td class="num">'+px(r.entry)+'</td><td class="num">'+r.qty+'</td><td class="num">'+px(r.target)+'</td>'+
+      '<td><span class="pill '+(r.status==='Open'?'wait':'')+'">'+r.status+'</span></td><td>'+esc(r.exit_ts||'-')+'</td><td class="num">'+px(r.exit)+'</td>'+
+      '<td class="num '+cls(r.net)+'">'+signed(r.net)+(r.status==='Open'?'<div class="meta">at last price</div>':'')+'</td><td class="num">'+hrs(r.hold_hours)+'</td></tr>').join('');
+}
+
+loadSyms();
+</script>
+</body>
+</html>
