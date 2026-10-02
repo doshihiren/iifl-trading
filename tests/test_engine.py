@@ -1,6 +1,7 @@
 """Engine tests against a simulated IIFL broker. Run:  python -m unittest -v tests.test_engine"""
 
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -30,6 +31,9 @@ import db  # noqa: E402
 import engine as eng  # noqa: E402
 
 IST = ZoneInfo("Asia/Kolkata")
+
+# Tests simulate mismatches and manual exits on purpose; keep their log lines out of the output.
+logging.disable(logging.CRITICAL)
 
 
 class FakeBroker:
