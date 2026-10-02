@@ -142,6 +142,7 @@
 </div>
 
 <script>
+async function readJson(r){const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error('Server error (HTTP '+r.status+'). The request timed out or the web service is restarting – try again in a minute.')}}
 let verified = null;
 let bots = [];
 
@@ -154,7 +155,7 @@ async function verifySymbol(){
   status.textContent='Verifying with IIFL…';
   try{
     const r = await fetch('/iifl/market/quote?symbol='+encodeURIComponent(symbol));
-    const data = await r.json();
+    const data = await readJson(r);
     if(!r.ok || !data.instrument || !data.iifl_response || !data.iifl_response.result || !data.iifl_response.result.length){
       throw new Error(data.message || 'Symbol could not be verified');
     }
@@ -171,7 +172,7 @@ async function verifySymbol(){
 async function loadBots(){
   try{
     const r=await fetch('/iifl/api/bots');
-    const data=await r.json();
+    const data=await readJson(r);
     bots=(data.result || []);
     renderBots();
   }catch(e){
@@ -204,7 +205,7 @@ async function addBot(){
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(bot)
     });
-    const data=await r.json();
+    const data=await readJson(r);
     if(!r.ok) throw new Error(data.message || 'Could not save bot');
     status.textContent=bot.symbol+' saved successfully.';
     await loadBots();
@@ -217,7 +218,7 @@ async function removeBot(botId, symbol){
   if(!confirm('Remove '+symbol+' bot configuration?')) return;
   try{
     const r=await fetch('/iifl/api/bots/'+encodeURIComponent(botId),{method:'DELETE'});
-    const data=await r.json();
+    const data=await readJson(r);
     if(!r.ok) throw new Error(data.message || 'Could not remove bot');
     await loadBots();
   }catch(e){
@@ -229,7 +230,7 @@ async function removeBot(botId, symbol){
 async function startBot(botId){
   try{
     const r=await fetch('/iifl/api/bots/'+encodeURIComponent(botId)+'/start',{method:'POST'});
-    const data=await r.json();
+    const data=await readJson(r);
     if(!r.ok) throw new Error(data.message || 'Could not start bot');
     await loadBots();
   }catch(e){
@@ -240,7 +241,7 @@ async function startBot(botId){
 async function stopBot(botId){
   try{
     const r=await fetch('/iifl/api/bots/'+encodeURIComponent(botId)+'/stop',{method:'POST'});
-    const data=await r.json();
+    const data=await readJson(r);
     if(!r.ok) throw new Error(data.message || 'Could not stop bot');
     await loadBots();
   }catch(e){
@@ -258,7 +259,7 @@ async function exitBot(botId, symbol){
   if(!confirm('Sell ALL open positions of this '+symbol+' bot at MARKET price now, then stop it?')) return;
   try{
     const r=await fetch('/iifl/api/bots/'+encodeURIComponent(botId)+'/exit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'EXIT'})});
-    const data=await r.json();
+    const data=await readJson(r);
     if(!r.ok) throw new Error(data.message || 'Could not exit bot');
     await loadBots();
   }catch(e){document.getElementById('status').textContent=e.message || 'Could not exit bot.'}
@@ -312,7 +313,7 @@ function renderBots(){
 async function loadReports(){
   try{
     const r=await fetch('/iifl/api/reports/summary');
-    const data=await r.json();
+    const data=await readJson(r);
     const s=data.result || {};
     document.getElementById('tradeCount').textContent=s.trade_count || 0;
     document.getElementById('openTrades').textContent=s.open_trades || 0;
@@ -351,7 +352,7 @@ async function loadSystem(){
   try{
     const r=await fetch('/iifl/api/system');
     if(r.status===401){location.href='/iifl/auth/login';return}
-    const s=(await r.json()).result || {};
+    const s=(await readJson(r)).result || {};
     const sess=s.broker_session;
     setBadge('sessionBadge', 'IIFL: '+sess, sess==='CONNECTED'?'':(sess==='UNVERIFIED'?'warn':'bad'));
     document.getElementById('loginLink').style.display = sess==='CONNECTED' ? 'none' : '';
@@ -376,7 +377,7 @@ async function loadSystem(){
 async function loadOrders(){
   try{
     const r=await fetch('/iifl/api/orders');
-    const rows=(await r.json()).result || [];
+    const rows=(await readJson(r)).result || [];
     const tbody=document.getElementById('orderRows');
     if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No LIVE orders yet.</td></tr>';return}
     tbody.innerHTML=rows.map(o=>'<tr><td>'+tm(o.created_at)+'</td><td>'+esc(o.symbol)+'<div class="meta">'+esc(o.bot_id)+'</div></td><td>'+esc(o.side)+'</td><td>'+esc(o.filled_qty)+'/'+esc(o.qty)+'</td>'+
@@ -409,7 +410,7 @@ async function saveEdit(){
   const st=document.getElementById('editStatus'); st.textContent='Saving…';
   try{
     const r=await fetch('/iifl/api/bots/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const d=await r.json(); if(!r.ok) throw new Error(d.message||'Could not save');
+    const d=await readJson(r); if(!r.ok) throw new Error(d.message||'Could not save');
     closeEdit(); await loadBots();
   }catch(e){st.textContent=e.message}
 }

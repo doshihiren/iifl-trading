@@ -134,7 +134,8 @@ function cls(v){v=Number(v);return v>0?'pos':(v<0?'neg':'')}
 function px(v){return v===null||v===undefined?'-':Number(v).toFixed(2)}
 function hrs(h){if(h===null||h===undefined)return '-';h=Number(h);if(h<1)return Math.round(h*60)+' min';if(h<48)return h.toFixed(1)+' h';return (h/24).toFixed(1)+' days'}
 function dfmt(s){if(!s)return '-';const d=new Date(s.slice(0,10)+'T00:00:00');return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}
-async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){location.href='/iifl/auth/login';throw new Error('login')}const d=await r.json();if(!r.ok)throw new Error(d.message||'Request failed');return d.result}
+async function readJson(r){const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error('Server error (HTTP '+r.status+'). The request timed out or the web service is restarting – try again in a minute.')}}
+async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){location.href='/iifl/auth/login';throw new Error('login')}const d=await readJson(r);if(!r.ok)throw new Error(d.message||'Request failed');return d.result}
 
 // ---------- step 1 ----------
 async function verify(){
@@ -142,7 +143,7 @@ async function verify(){
   if(!s){$('symInfo').textContent='Type a script code';return}
   $('symInfo').textContent='Checking with IIFL…';
   try{
-    const r=await fetch('/iifl/market/quote?symbol='+encodeURIComponent(s)); const d=await r.json();
+    const r=await fetch('/iifl/market/quote?symbol='+encodeURIComponent(s)); const d=await readJson(r);
     const q=d.iifl_response&&d.iifl_response.result&&d.iifl_response.result[0];
     if(!r.ok||!q) throw new Error(d.message||'Not found');
     verified=s; $('symInfo').textContent='✓ '+(d.instrument.tradingSymbol||s)+' • LTP ₹'+Number(q.ltp).toFixed(2);

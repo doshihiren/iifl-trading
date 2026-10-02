@@ -115,6 +115,7 @@
 </div>
 
 <script>
+async function readJson(r){const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error('Server error (HTTP '+r.status+'). The request timed out or the web service is restarting – try again in a minute.')}}
 let R=null, sortState={};
 const $=id=>document.getElementById(id);
 function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -155,7 +156,7 @@ async function load(){
   history.replaceState(null,'','?'+q);
   const r=await fetch('/iifl/api/reports/detail?'+q);
   if(r.status===401){location.href='/iifl/auth/login';return}
-  R=(await r.json()).result;
+  R=(await readJson(r)).result;
   fillSelects(); renderKpis(); renderCharts(); renderExits(); renderOrders(); renderGroups(); renderTrades();
 }
 
