@@ -109,6 +109,9 @@ def cmd_candles_check():
     status, body = market_data.historical_candles(inst["instrumentId"], exchange=inst.get("exchange", "NSEEQ"),
                                                   timeframe="1m", from_date=day.strftime("%d-%b-%Y"),
                                                   to_date=day.strftime("%d-%b-%Y"))
+    if status in (401, 403):
+        print(f"HTTP {status}: IIFL session is not valid. Open the dashboard, click 'Login to IIFL', then run this again.")
+        return
     raw = json.dumps(body, default=str)
     print(f"{symbol} {day} HTTP {status}; raw reply ({len(raw)} chars), first 1500 chars:")
     print(raw[:1500])

@@ -249,7 +249,10 @@ def run_requested(now, fetch=iifl_fetch, pause=REQUEST_PAUSE):
                  "Some days failed: " + ", ".join(result["failed_days"][:5]))
             db.add_event("CANDLES_SYNCED", f"{sym['symbol']}: {_summary(result)}")
         except Exception as exc:
-            _set(sym["instrumentId"], sync_status="Fetch failed", last_error=str(exc)[:300])
+            msg = str(exc)[:300]
+            if exc.__class__.__name__ == "SessionExpired":
+                msg = "IIFL session expired – click 'Login to IIFL' on the dashboard, then press Re-fetch."
+            _set(sym["instrumentId"], sync_status="Fetch failed", last_error=msg)
             log.warning("event=CANDLE_SYNC_FAILED symbol=%s error=%s", sym["symbol"], exc)
             if exc.__class__.__name__ == "SessionExpired":
                 return
@@ -270,7 +273,10 @@ def run_live_daily(now, fetch=iifl_fetch, pause=REQUEST_PAUSE):
                  sync_status="Live: " + _summary(result) + f" (added {today:%d %b})", last_error=None)
             db.add_event("CANDLES_LIVE", f"{sym['symbol']}: added {today:%d %b} – {_summary(result)}")
         except Exception as exc:
-            _set(sym["instrumentId"], last_error=str(exc)[:300])
+            msg = str(exc)[:300]
+            if exc.__class__.__name__ == "SessionExpired":
+                msg = "Daily 5 PM update failed: IIFL session expired. Log in to IIFL; it retries automatically."
+            _set(sym["instrumentId"], last_error=msg)
             log.warning("event=CANDLE_LIVE_FAILED symbol=%s error=%s", sym["symbol"], exc)
             if exc.__class__.__name__ == "SessionExpired":
                 return
