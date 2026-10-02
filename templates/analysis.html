@@ -181,7 +181,7 @@ async function loadSyms(){
   const cur=$('aSym').value;
   const ready=SYMS.filter(s=>s.candles>0);
   $('aSym').innerHTML=ready.length?ready.map(s=>'<option value="'+esc(s.instrumentId)+'">'+esc(s.symbol)+'</option>').join(''):'<option value="">No data yet</option>';
-  if(cur && ready.some(s=>s.instrumentId===cur)) $('aSym').value=cur; else onSymChange(true);
+  if(cur && ready.some(s=>s.instrumentId===cur)){ $('aSym').value=cur; onSymChange(false); } else onSymChange(true);
   updateHints();
   clearTimeout(pollTimer); if(SYMS.some(s=>s.sync_requested)) pollTimer=setTimeout(loadSyms,5000);
 }
@@ -189,8 +189,15 @@ function curSym(){return SYMS.find(s=>s.instrumentId===$('aSym').value)}
 function onSymChange(resetDates){
   const s=curSym(); if(!s){$('aSymInfo').textContent='';return}
   $('aSymInfo').textContent='Data '+dfmt(s.first)+' – '+dfmt(s.last)+' • last ₹'+px(s.last_close);
-  if(resetDates!==false){$('from').value=(s.first||'').slice(0,10);$('to').value=(s.last||'').slice(0,10)}
-  $('from').min=$('to').min=(s.first||'').slice(0,10); $('from').max=$('to').max=(s.last||'').slice(0,10);
+  const first=(s.first||'').slice(0,10), last=(s.last||'').slice(0,10);
+  const prevMin=$('from').min, prevMax=$('to').max;
+  if(resetDates!==false){$('from').value=first;$('to').value=last}
+  else{
+    // Data range grew (download finished / daily update): widen the chosen dates if they sat on the old edges.
+    if(!$('from').value || $('from').value===prevMin || $('from').value<first) $('from').value=first;
+    if(!$('to').value || $('to').value===prevMax || $('to').value>last) $('to').value=last;
+  }
+  $('from').min=$('to').min=first; $('from').max=$('to').max=last;
   updateHints();
 }
 $('aSym').addEventListener('change',()=>onSymChange(true));
