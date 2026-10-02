@@ -414,6 +414,11 @@ def market_quote_route():
             instrument_id=instrument["instrumentId"],
             exchange=exchange,
         )
+        if http_status in (401, 403):
+            return jsonify({
+                "status": "error",
+                "message": "IIFL login has expired. Click 'Login to IIFL' on the dashboard, then try again.",
+            }), 502
         return jsonify({
             "status": "forwarded",
             "symbol": symbol.upper(),
