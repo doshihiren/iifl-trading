@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RSI Analysis</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#121a2e;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--grid:#1d2842;--blue:#6ea8fe;
+      --s1:#3987e5;--s2:#d95926;--s3:#9b7be8;--good:#32d583;--bad:#ff6b6b;--warn:#ffd98a}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#08101f,#0f1730);font-family:Inter,system-ui,Arial,sans-serif;color:var(--text)}
+    .wrap{max-width:1400px;margin:auto;padding:24px 18px 60px}
+    .top{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap}
+    h1{font-size:26px;margin:0 0 4px}.sub{color:var(--muted);margin:0;font-size:14px}
+    .nav{display:flex;gap:16px;flex-wrap:wrap}.nav a{color:var(--blue);text-decoration:none;font-weight:700;font-size:14px}
+    .card{background:rgba(18,26,46,.95);border:1px solid var(--line);border-radius:18px;padding:18px 20px;margin-bottom:16px}
+    h2{font-size:17px;margin:0 0 14px}h3{font-size:14px;margin:18px 0 10px;color:#cfe0ff}
+    .step{display:inline-block;background:#24365e;color:#cfe0ff;border-radius:999px;width:24px;height:24px;text-align:center;line-height:24px;font-size:13px;margin-right:8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end}
+    .f{display:flex;flex-direction:column;gap:6px;min-width:0}.f label{font-size:11px;color:var(--muted)}
+    .hint{font-size:11px;color:#b9d2ff;min-height:14px}
+    input,select,textarea{width:100%;background:#0d1528;color:var(--text);border:1px solid #30405f;border-radius:10px;padding:9px 11px;font-size:13px;outline:none;color-scheme:dark;font-family:inherit}
+    textarea{min-height:92px;resize:vertical;font-family:ui-monospace,Consolas,monospace}
+    input:focus,select:focus,textarea:focus{border-color:var(--blue)}
+    button{border:0;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer;font-size:13px}
+    button:disabled{opacity:.55;cursor:wait}
+    .primary{background:var(--blue);color:#071225}.go{background:var(--good);color:#052718}.secondary{background:#202d49;color:var(--text)}.purple{background:var(--s3);color:#120b26}
+    .btn-sm{padding:6px 10px;font-size:12px;border-radius:8px}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
+    table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+    th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+    th{color:var(--muted);font-weight:600;position:sticky;top:0;background:#121a2e}
+    td.num,th.num{text-align:right}.scroll{overflow:auto;max-height:480px}
+    .meta{color:var(--muted);font-size:12px}.pos{color:var(--good)}.neg{color:var(--bad)}.err{color:#ff9da4}
+    .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px}
+    .kpi{background:#0d1528;border:1px solid var(--line);border-radius:13px;padding:13px;min-width:0}
+    .kpi b{display:block;font-size:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kpi span{color:var(--muted);font-size:11px}.kpi small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+    .hero{grid-column:span 2}.hero b{font-size:30px}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}.two>*{min-width:0}
+    .cmp td.best{background:rgba(57,135,229,.14);font-weight:700}.cmp th.sel{color:#fff}
+    .chart{position:relative;width:100%}.chart svg{display:block;width:100%}
+    .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin:-6px 0 8px;flex-wrap:wrap}.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+    .tip{position:absolute;pointer-events:none;background:#0a1122;border:1px solid #33456b;border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.5;opacity:0;white-space:nowrap;z-index:5}
+    .pill{padding:4px 8px;border-radius:999px;font-size:11px;font-weight:800;background:#183527;color:#8af0b6;display:inline-block}
+    .pill.wait{background:#3d3115;color:#ffd98a}.pill.off{background:#202d49;color:#c9d6f2}.pill.bad{background:#43232a;color:#ffc5ca}
+    .empty{color:var(--muted);text-align:center;padding:22px}
+    .note{font-size:12px;color:#aeb9d1;background:#0c1426;border:1px solid var(--line);padding:11px 13px;border-radius:10px;line-height:1.6}
+    .section-title{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#8fb6ff;margin:18px 0 10px;font-weight:800}
+    .bar{height:10px;background:#0d1528;border:1px solid var(--line);border-radius:999px;overflow:hidden}.bar>div{height:100%;background:var(--s3);width:0;transition:width .3s}
+    .gauge{position:relative;height:16px;border-radius:999px;background:linear-gradient(90deg,#1f7a4d 0%,#1f7a4d 30%,#2a3858 30%,#2a3858 70%,#8a2d35 70%,#8a2d35 100%);margin:10px 0 4px}
+    .gauge i{position:absolute;top:-5px;width:4px;height:26px;background:#fff;border-radius:2px;transform:translateX(-2px)}
+    .gscale{display:flex;justify-content:space-between;font-size:10px;color:var(--muted)}
+    .big{font-size:42px;font-weight:800;line-height:1}
+    .hide{display:none}
+    tr.baseline td{color:#c9d6f2;background:rgba(155,123,232,.08)}
+    @media(max-width:900px){.two{grid-template-columns:1fr}.hero{grid-column:auto}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>RSI Analysis</h1><p class="sub">Bot rules + 1-minute RSI: skip risky buys, ride strong moves, book your existing shares at high RSI</p></div>
+    <div class="nav"><a href="/iifl/analysis">🔬 Analysis (classic)</a><a href="/iifl/reports">📊 Reports</a><a href="/iifl/">← Dashboard</a></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">1</span>Price data <span class="meta">(shared with the Analysis tab)</span></h2>
+    <div class="grid">
+      <div class="f" style="grid-column:span 2"><label>Add an NSE script</label><input id="sym" placeholder="e.g. SBC, RELIANCE" autocomplete="off"><div class="hint"></div></div>
+      <div class="f"><label>Past data</label><select id="duration"><option value="1w">1 week</option><option value="1m">1 month</option><option value="3m" selected>3 months (best)</option></select><div class="hint"></div></div>
+      <div class="f"><label>&nbsp;</label><button class="secondary" onclick="fetchData()">Fetch 1-minute data</button><div class="hint" id="fetchMsg"></div></div>
+    </div>
+    <div class="scroll" style="margin-top:10px;max-height:220px"><table id="symTable"></table></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span>Settings</h2>
+    <div class="section-title">Strategy</div>
+    <div class="grid">
+      <div class="f"><label>Script (with data)</label><select id="aSym"></select><div class="hint" id="aSymInfo"></div></div>
+      <div class="f"><label>Entry timeframe</label><select id="tf"><option>1m</option><option>5m</option><option selected>15m</option></select><div class="hint">RSI is always 1-minute</div></div>
+      <div class="f"><label>Start date</label><input type="date" id="from"><div class="hint"></div></div>
+      <div class="f"><label>End date</label><input type="date" id="to"><div class="hint"></div></div>
+      <div class="f"><label>Profit target %</label><input type="number" id="target" value="1" min="0.01" step="0.05"><div class="hint" id="targetInr"></div></div>
+      <div class="f"><label>Shares per entry</label><input type="number" id="shares" value="10" min="1" step="1"><div class="hint" id="entryValue"></div></div>
+      <div class="f"><label>Max open entries</label><input type="number" id="maxOpen" value="20" min="1" step="1"><div class="hint" id="fullCap"></div></div>
+      <div class="f"><label>Capital limit ₹ (blank = no limit)</label><input type="number" id="capital" min="0" step="1000" placeholder="no limit"><div class="hint"></div></div>
+      <div class="f"><label>Max buys per batch (0 = off)</label><input type="number" id="batch" value="0" min="0" step="1"><div class="hint"></div></div>
+      <div class="f"><label>Re-buy after drop % from last sell</label><input type="number" id="dip" value="1" min="0" step="0.05"><div class="hint">Used only when batch &gt; 0</div></div>
+      <div class="f"><label>Charges % per side</label><input type="number" id="charges" value="0.1" min="0" step="0.01"><div class="hint">Delivery ≈ 0.1–0.15% per side</div></div>
+    </div>
+
+    <div class="section-title">RSI rules (1-minute RSI)</div>
+    <div class="grid">
+      <div class="f"><label>RSI period</label><input type="number" id="rsiPeriod" value="14" min="2" max="50" step="1"><div class="hint">14 is standard</div></div>
+      <div class="f"><label>Skip buys when RSI ≥ (blank = off)</label><input type="number" id="maxRsi" value="70" min="1" max="100" step="1"><div class="hint">Avoids buying after a run-up</div></div>
+      <div class="f"><label>Skip buys when RSI ≤ and falling (blank = off)</label><input type="number" id="minRsi" min="1" max="100" step="1" placeholder="off"><div class="hint">Falling-knife filter, e.g. 25</div></div>
+      <div class="f"><label>Ride winners when RSI ≥ (blank = off)</label><input type="number" id="holdRsi" value="60" min="1" max="100" step="1"><div class="hint">At target, keep holding if RSI is this strong</div></div>
+      <div class="f"><label>Book ridden lots when RSI ≥</label><input type="number" id="exitRsi" value="78" min="1" max="100" step="1"><div class="hint">Sell at the momentum peak</div></div>
+      <div class="f"><label>Max stretch (× target)</label><input type="number" id="stretch" value="3" min="0" step="0.5"><div class="hint" id="stretchHint">0 = no cap</div></div>
+    </div>
+
+    <div class="section-title">Shares you already hold (optional)</div>
+    <div class="grid">
+      <div class="f" style="grid-column:span 2"><label>One line each: quantity @ buy price</label><textarea id="holdings" placeholder="100 @ 2450.50&#10;50 @ 2390"></textarea><div class="hint" id="holdHint">These are booked only at high RSI and never below your minimum profit</div></div>
+      <div class="f"><label>Book when RSI ≥</label><input type="number" id="bookRsi" value="70" min="1" max="100" step="1"><div class="hint"></div></div>
+      <div class="f"><label>Sell in</label><select id="bookParts"><option value="1">1 part (all at once)</option><option value="2">2 parts</option><option value="3" selected>3 parts (ladder)</option></select><div class="hint" id="ladderHint"></div></div>
+      <div class="f"><label>RSI step between parts</label><input type="number" id="bookStep" value="5" min="0" max="20" step="1"><div class="hint"></div></div>
+      <div class="f"><label>Minimum profit % before selling</label><input type="number" id="minProfit" value="0.5" min="0" step="0.1"><div class="hint">Covers charges; never sells at a loss</div></div>
+    </div>
+
+    <div class="actions">
+      <button class="go" id="runBtn" onclick="runAnalysis()">▶ Run analysis</button>
+      <button class="purple" id="optBtn" onclick="optimize()">✨ Find best settings</button>
+      <button class="primary" id="nowBtn" onclick="checkNow()">⚡ Check RSI now</button>
+      <span class="err" id="runMsg"></span>
+    </div>
+  </div>
+
+  <!-- live RSI -->
+  <div class="card hide" id="nowCard">
+    <h2>RSI right now <span class="meta" id="nowMeta"></span></h2>
+    <div class="two">
+      <div>
+        <div style="display:flex;align-items:baseline;gap:14px"><span class="big" id="nowRsi">-</span><span id="nowTrend" class="meta"></span></div>
+        <div class="gauge"><i id="nowNeedle"></i></div><div class="gscale"><span>0</span><span>30</span><span>50</span><span>70</span><span>100</span></div>
+        <p style="margin:14px 0 6px">New bot entries: <span id="nowEntry"></span></p>
+        <div class="meta" id="nowSource"></div>
+      </div>
+      <div><div class="legend"><span><i style="background:var(--s3)"></i>1-minute RSI, last 2 hours</span></div><div class="chart" id="nowChart"></div></div>
+    </div>
+    <div id="nowHoldWrap" class="hide"><h3>Your shares</h3><div class="scroll"><table id="nowHold"></table></div></div>
+  </div>
+
+  <!-- optimizer -->
+  <div class="card hide" id="optCard">
+    <h2>✨ Best settings for <span id="optSym"></span> <span class="meta" id="optMeta"></span></h2>
+    <div id="optProgress"><div class="bar"><div id="optBar"></div></div><p class="meta" id="optMsg">Starting…</p></div>
+    <div id="optOut" class="hide">
+      <div class="kpis" id="optKpis"></div>
+      <h3>Top setups <span class="meta">(each a different timeframe / target / entry filter; ranked on the first 70% of days, checked on the last 30%)</span></h3>
+      <div class="scroll"><table id="optTable"></table></div>
+      <h3>Best per timeframe</h3>
+      <div class="scroll"><table id="tfTable"></table></div>
+      <div id="optHoldWrap" class="hide"><h3>Best way to sell your existing shares</h3><div class="scroll"><table id="optHold"></table></div><p class="meta" id="optHoldNote"></p></div>
+    </div>
+  </div>
+
+  <!-- backtest results -->
+  <div id="results" class="hide">
+    <div class="card">
+      <h2 id="resTitle"></h2>
+      <div class="kpis" id="kpis"></div>
+    </div>
+    <div class="card" id="holdCard">
+      <h2>Your existing shares</h2>
+      <div class="kpis" id="holdKpis"></div>
+      <div class="scroll" style="margin-top:12px"><table id="holdTable"></table></div>
+    </div>
+    <div class="card">
+      <h2>1m vs 5m vs 15m entries <span class="meta">(same RSI rules and dates • best value highlighted)</span></h2>
+      <div class="scroll"><table class="cmp" id="cmpTable"></table></div>
+    </div>
+    <div class="two">
+      <div class="card"><h2>Profit over time</h2>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Booked profit</span><span><i style="background:var(--s2)"></i>Incl. open positions</span></div>
+        <div class="chart" id="eqChart"></div></div>
+      <div class="card"><h2>Price</h2><div class="chart" id="pxChart"></div></div>
+    </div>
+    <div class="card"><h2>1-minute RSI during the test</h2>
+      <div class="legend" id="rsiLegend"></div><div class="chart" id="rsiChart"></div></div>
+    <div class="card"><h2>Day by day</h2><div class="scroll"><table id="dayTable"></table></div></div>
+    <div class="card"><h2>Simulated trades <span class="meta" id="tradeMeta"></span></h2><div class="scroll"><table id="tradeTable"></table></div></div>
+    <div class="note">
+      <b>How this test works.</b> Same rules as the bot (a buy at the start of every slot at that minute's open, its own target per entry, no stop loss, positions held overnight, max open / capital / batch limits), plus RSI.
+      RSI is Wilder RSI on 1-minute closes. Every decision uses the RSI of the candle that had already <b>closed</b> – nothing from the future. Signals raised at a candle's close are executed at the next candle's open.
+      A ridden lot's target becomes its floor; it is sold at the RSI peak, when RSI fades, at the floor, or at the max stretch. The first ~10 days before your start date are loaded only to warm up RSI.
+      When 1-minute data can't tell which happened first, the less favourable order is assumed. Real fills can differ by a tick or two. Past results don't guarantee future results.
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let SYMS=[], RES=null, OPT=null;
+function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function inr(v,d=2){if(v===null||v===undefined||v==='')return '-';const n=Number(v);return (n<0?'-':'')+'₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d})}
+function signed(v){if(v===null||v===undefined)return '-';const n=Number(v);return (n>0?'+':'')+inr(n)}
+function cls(v){v=Number(v);return v>0?'pos':(v<0?'neg':'')}
+function px(v){return v===null||v===undefined?'-':Number(v).toFixed(2)}
+function pct(v){return v===null||v===undefined?'-':(v>0?'+':'')+Number(v).toFixed(2)+'%'}
+function hrs(h){if(h===null||h===undefined)return '-';h=Number(h);if(h<1)return Math.round(h*60)+' min';if(h<48)return h.toFixed(1)+' h';return (h/24).toFixed(1)+' days'}
+function dfmt(s){if(!s)return '-';const d=new Date(s.slice(0,10)+'T00:00:00');return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}
+function rsiTxt(v){return v===null||v===undefined?'off':v}
+async function readJson(r){const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error('Server error (HTTP '+r.status+'). The request timed out or the web service is restarting – try again in a minute.')}}
+async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){location.href='/iifl/auth/login';throw new Error('login')}const d=await readJson(r);if(!r.ok)throw new Error(d.message||'Request failed');return d.result}
+const post=(url,body)=>api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+
+// ---------- data ----------
+async function fetchData(){
+  const s=$('sym').value.trim().toUpperCase(); if(!s){$('fetchMsg').textContent='Enter a script first';return}
+  $('fetchMsg').textContent='Queuing…';
+  try{await post('/iifl/api/analysis/symbols',{symbol:s,duration:$('duration').value,live:false});$('fetchMsg').textContent='Queued – downloads in the background (about 1–3 minutes).';loadSyms()}
+  catch(e){$('fetchMsg').textContent=e.message}
+}
+let pollTimer=null;
+async function loadSyms(){
+  try{SYMS=await api('/iifl/api/analysis/symbols')}catch(e){return}
+  const t=$('symTable');
+  t.innerHTML=!SYMS.length?'<tr><td class="empty">No scripts yet. Add one above.</td></tr>':
+    '<tr><th>Script</th><th>Data from</th><th>Data to</th><th class="num">Days</th><th>Status</th></tr>'+SYMS.map(s=>
+      '<tr><td><b>'+esc(s.symbol)+'</b></td><td>'+dfmt(s.first)+'</td><td>'+dfmt(s.last)+'</td><td class="num">'+s.days+'</td><td style="white-space:normal">'+
+      (s.sync_requested?'<span class="pill wait">Fetching…</span> ':'')+'<span class="meta">'+esc(s.sync_status||'')+'</span>'+(s.last_error?'<div class="meta err">'+esc(s.last_error)+'</div>':'')+'</td></tr>').join('');
+  const cur=$('aSym').value, ready=SYMS.filter(s=>s.candles>0);
+  $('aSym').innerHTML=ready.length?ready.map(s=>'<option value="'+esc(s.instrumentId)+'">'+esc(s.symbol)+'</option>').join(''):'<option value="">No data yet</option>';
+  if(cur&&ready.some(s=>s.instrumentId===cur)){$('aSym').value=cur;onSymChange(false)}else onSymChange(true);
+  clearTimeout(pollTimer); if(SYMS.some(s=>s.sync_requested)) pollTimer=setTimeout(loadSyms,5000);
+}
+function curSym(){return SYMS.find(s=>s.instrumentId===$('aSym').value)}
+function onSymChange(reset){
+  const s=curSym(); if(!s){$('aSymInfo').textContent='';return}
+  $('aSymInfo').textContent=s.days+' days • last ₹'+px(s.last_close);
+  const first=(s.first||'').slice(0,10), last=(s.last||'').slice(0,10), pMin=$('from').min, pMax=$('to').max;
+  if(reset!==false){$('from').value=first;$('to').value=last}
+  else{if(!$('from').value||$('from').value===pMin||$('from').value<first)$('from').value=first;if(!$('to').value||$('to').value===pMax||$('to').value>last)$('to').value=last}
+  $('from').min=$('to').min=first;$('from').max=$('to').max=last;updateHints();
+}
+$('aSym').addEventListener('change',()=>onSymChange(true));
+function updateHints(){
+  const s=curSym(),price=s&&s.last_close?Number(s.last_close):null,p=Number($('target').value)||0,sh=Math.floor(Number($('shares').value)||0),mo=Math.floor(Number($('maxOpen').value)||0),st=Number($('stretch').value)||0;
+  $('stretchHint').textContent=st>1?'Ridden lots booked by +'+(p*st).toFixed(2)+'% at the latest':'0 = no cap';
+  const parts=Number($('bookParts').value),lvl=Number($('bookRsi').value)||0,step=Number($('bookStep').value)||0;
+  $('ladderHint').textContent=parts>1?'Sells at RSI '+Array.from({length:parts},(_,k)=>lvl+k*step).join(' / '):'';
+  if(!price){['targetInr','entryValue','fullCap'].forEach(i=>$(i).textContent='');return}
+  $('targetInr').textContent='≈ ₹'+(price*p/100).toFixed(2)+' per share';
+  $('entryValue').textContent='One entry ≈ '+inr(price*sh,0);
+  $('fullCap').textContent='All '+mo+' open ≈ '+inr(price*sh*mo,0);
+}
+['target','shares','maxOpen','stretch','bookParts','bookRsi','bookStep'].forEach(i=>$(i).addEventListener('input',updateHints));
+
+function body(){
+  const s=curSym(); if(!s) throw new Error('Fetch data for a script first');
+  return {instrumentId:s.instrumentId,timeframe:$('tf').value,from:$('from').value,to:$('to').value,target_pct:$('target').value,shares:$('shares').value,
+    max_open:$('maxOpen').value,capital_limit:$('capital').value,batch_size:$('batch').value,rebuy_dip_pct:$('dip').value,charges_pct:$('charges').value,
+    rsi_period:$('rsiPeriod').value,max_entry_rsi:$('maxRsi').value,min_entry_rsi:$('minRsi').value,hold_rsi:$('holdRsi').value,exit_rsi:$('exitRsi').value,max_stretch:$('stretch').value,
+    holdings:$('holdings').value,book_rsi:$('bookRsi').value,book_parts:$('bookParts').value,book_step:$('bookStep').value,min_profit_pct:$('minProfit').value};
+}
+function busy(id,on,label){const b=$(id);if(on){b.dataset.t=b.textContent;b.textContent=label;b.disabled=true}else{b.textContent=b.dataset.t||b.textContent;b.disabled=false}}
+
+// ---------- run ----------
+async function runAnalysis(){
+  $('runMsg').textContent='';busy('runBtn',true,'Running…');
+  try{RES=await post('/iifl/api/analysis-rsi/run',body());render()}catch(e){$('runMsg').textContent=e.message}
+  busy('runBtn',false);
+}
+function kpi(label,value,extra,c,hero){return '<div class="kpi'+(hero?' hero':'')+'"><b class="'+(c||'')+'">'+value+'</b><span>'+label+'</span>'+(extra?'<small>'+extra+'</small>':'')+'</div>'}
+function render(){
+  $('results').classList.remove('hide');
+  const m=RES.meta,s=RES.result.summary,p=m.params,pl=RES.plain,r=s.exits_by_reason;
+  $('resTitle').innerHTML=esc(m.symbol)+' • '+esc(s.timeframe)+' entries • '+dfmt(m.from)+' – '+dfmt(m.to)+' <span class="meta">('+s.trading_days+' trading days • trading from '+esc(m.from)+' • candles from '+esc(m.warmup_from)+' used to warm up RSI)</span>';
+  const diff=s.net_pnl-pl.net_pnl;
+  $('kpis').innerHTML=
+    kpi('Booked profit (after charges)',signed(s.net_pnl),s.closed+' trades closed',cls(s.net_pnl),true)+
+    kpi('RSI vs plain strategy',signed(diff),'Same settings without RSI: '+signed(pl.net_pnl),cls(diff),true)+
+    kpi('Extra from riding winners',signed(s.extra_from_rsi),s.rides+' lots rode past target • '+r.RSI_PEAK+' booked at RSI peak',cls(s.extra_from_rsi))+
+    kpi('Risky buys avoided',(s.skipped_rsi_high+s.skipped_rsi_low).toLocaleString('en-IN'),s.skipped_rsi_high+' RSI too high • '+s.skipped_rsi_low+' falling knife')+
+    kpi('Return on capital used',pct(s.return_on_peak_pct),'Plain: '+pct(pl.return_on_peak_pct),cls(s.return_on_peak_pct))+
+    kpi('Peak capital needed',inr(s.peak_capital,0),'Plain: '+inr(pl.peak_capital,0))+
+    kpi('Still open at end',s.open_count+' ('+s.open_qty+' sh)','Plain: '+pl.open_count+' • now '+signed(s.unrealized),cls(s.unrealized))+
+    kpi('Worst dip in profit',s.max_drawdown?'-'+inr(s.max_drawdown):'₹0.00','Plain: '+(pl.max_drawdown?'-'+inr(pl.max_drawdown):'₹0'),s.max_drawdown?'neg':'')+
+    kpi('Avg hold',hrs(s.avg_hold_hours),'Longest '+hrs(s.max_hold_hours))+
+    kpi('Stock moved',pct(s.price_change_pct),'₹'+px(s.first_price)+' → ₹'+px(s.last_price),cls(s.price_change_pct))+
+    kpi('How lots were sold',(r.TARGET+r.GAP_TARGET)+' at target',r.RSI_PEAK+' RSI peak • '+r.RSI_FADE+' RSI fade • '+r.FLOOR+' back to target • '+r.CAP+' max stretch');
+  renderHold(); renderCompare(); renderEq(); renderPx(); renderRsi(); renderDays(); renderTrades();
+  if(m.holdings_errors&&m.holdings_errors.length) $('runMsg').textContent=m.holdings_errors.join(' • ');
+  $('results').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function renderHold(){
+  const h=RES.result.holdings; $('holdCard').classList.toggle('hide',!h); if(!h)return;
+  $('holdKpis').innerHTML=kpi('Profit booked',signed(h.booked_profit),h.sold_qty+' of '+h.total_qty+' shares sold',cls(h.booked_profit),true)+
+    kpi('Value at end (cash + shares)',inr(h.end_value,0),'Just holding: '+inr(h.hold_value,0))+
+    kpi('vs just holding',signed(h.vs_just_holding),h.vs_just_holding<0?'Price kept rising after the sales':'Selling at high RSI paid off',cls(h.vs_just_holding))+
+    kpi('Shares still held',h.remaining,h.remaining?'Open P&L '+signed(h.unrealized_remaining):'All sold');
+  $('holdTable').innerHTML='<tr><th class="num">Shares</th><th class="num">Bought at</th><th class="num">Part</th><th class="num">Sell at RSI ≥</th><th class="num">Min price</th><th>Sold</th><th class="num">Sold at</th><th class="num">RSI</th><th class="num">Profit</th><th class="num">vs holding to end</th></tr>'+
+    h.rows.map(x=>'<tr><td class="num">'+x.qty+'</td><td class="num">'+px(x.buy)+'</td><td class="num">'+x.part+'</td><td class="num">'+x.level+'</td><td class="num">'+px(x.min_px)+'</td><td>'+
+      (x.sold_ts?esc(x.sold_ts):'<span class="pill wait">Not reached</span>')+'</td><td class="num">'+px(x.sold_px)+'</td><td class="num">'+(x.rsi??'-')+'</td><td class="num '+cls(x.profit)+'">'+signed(x.profit)+'</td><td class="num '+cls(x.vs_hold)+'">'+signed(x.vs_hold)+'</td></tr>').join('');
+}
+const CMP=[['net_pnl','Booked profit','money',1],['return_on_peak_pct','Return on capital used','pct',1],['extra_from_rsi','Extra from riding','money',1],['entries','Entries made','int',0],
+  ['skipped_rsi_high','Buys skipped (RSI high)','int',0],['closed','Trades closed','int',1],['avg_profit_per_trade','Avg profit per trade','money',1],['peak_capital','Peak capital needed','money0',-1],
+  ['open_count','Still open at end','int',-1],['unrealized','Open positions P&L','money',1],['total_pnl','Total incl. open','money',1],['max_drawdown','Worst dip in profit','dd',-1]];
+function fmtv(t,v){if(v===null||v===undefined)return '-';if(t==='money')return '<span class="'+cls(v)+'">'+signed(v)+'</span>';if(t==='money0')return inr(v,0);if(t==='dd')return Number(v)?'<span class="neg">-'+inr(v)+'</span>':'₹0.00';if(t==='pct')return pct(v);return Number(v).toLocaleString('en-IN')}
+function renderCompare(){
+  const c=RES.compare,tfs=['1m','5m','15m'],sel=RES.result.summary.timeframe;
+  $('cmpTable').innerHTML='<tr><th></th>'+tfs.map(t=>'<th class="num'+(t===sel?' sel':'')+'">'+t+(t===sel?' ●':'')+'</th>').join('')+'</tr>'+
+    CMP.map(([k,label,type,dir])=>{const vals=tfs.map(t=>c[t][k]);let best=null;if(dir){const n=vals.filter(v=>v!=null).map(Number);if(n.length){best=dir>0?Math.max(...n):Math.min(...n);if(n.every(v=>v===best))best=null}}
+      return '<tr><td>'+label+'</td>'+vals.map(v=>'<td class="num'+(best!==null&&Number(v)===best?' best':'')+'">'+fmtv(type,v)+'</td>').join('')+'</tr>'}).join('');
+}
+
+// ---------- charts ----------
+const tip=document.createElement('div');tip.className='tip';document.body.appendChild(tip);
+function showTip(h,x,y){tip.innerHTML=h;tip.style.opacity=1;const w=tip.offsetWidth;tip.style.left=Math.min(window.innerWidth-w-10,x+14)+'px';tip.style.top=(y+window.scrollY-10)+'px'}
+function hideTip(){tip.style.opacity=0}
+function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw)));const n=raw/p;return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p}
+function niceDomain(mn,mx,zero){if(zero){mn=Math.min(0,mn);mx=Math.max(0,mx)}if(mn===mx){mx=mn+1;mn=mn-1}const st=niceStep((mx-mn)/4);return [Math.floor(mn/st-1e-9)*st,Math.ceil(mx/st-1e-9)*st,st]}
+const rupee=(v,st)=>(v<0?'-':'')+'₹'+Math.abs(v).toLocaleString('en-IN',{maximumFractionDigits:st<1?2:0});
+function shortDay(d){return new Date(d.slice(0,10)+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short'})}
+function lineChart(el,series,labels,tipFn,o){
+  o=o||{};const W=el.clientWidth||600,H=o.h||250,m={l:o.l||70,r:14,t:12,b:28};
+  const all=series.flatMap(s=>s.values).filter(v=>v!=null);
+  const [lo,hi,st]=o.domain||niceDomain(Math.min(...all),Math.max(...all),o.zero);
+  const n=labels.length,x=i=>n===1?(W+m.l-m.r)/2:m.l+(W-m.l-m.r)*i/(n-1),y=v=>m.t+(H-m.t-m.b)*(1-(v-lo)/(hi-lo));
+  const fmt=o.fmt||rupee;let g='';
+  for(let v=lo;v<=hi+st/2;v+=st){g+='<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--grid)"/><text x="'+(m.l-8)+'" y="'+(y(v)+4)+'" fill="var(--muted)" font-size="11" text-anchor="end">'+fmt(v,st)+'</text>'}
+  (o.refs||[]).forEach(r=>{g+='<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y(r.v)+'" y2="'+y(r.v)+'" stroke="'+r.color+'" stroke-dasharray="5 4" opacity=".8"/>'});
+  if(o.zero&&lo<0&&hi>0)g+='<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y(0)+'" y2="'+y(0)+'" stroke="#5b6b8e"/>';
+  series.forEach(s=>{let d='',pen=false;s.values.forEach((v,i)=>{if(v==null){pen=false;return}d+=(pen?'L':'M')+x(i)+','+y(v);pen=true});g+='<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="'+(s.w||2)+'" stroke-linejoin="round"/>'});
+  const every=Math.max(1,Math.ceil(n/7));labels.forEach((l,i)=>{if(i%every===0)g+='<text x="'+x(i)+'" y="'+(H-m.b+16)+'" fill="var(--muted)" font-size="11" text-anchor="middle">'+l+'</text>'});
+  g+='<line class="xh" y1="'+m.t+'" y2="'+(H-m.b)+'" stroke="#5b6b8e" stroke-dasharray="3 3" opacity="0"/>';
+  series.forEach((s,k)=>{g+='<circle class="dot'+k+'" r="5" fill="'+s.color+'" stroke="#121a2e" stroke-width="2" opacity="0"/>'});
+  g+='<rect class="hit" x="'+m.l+'" y="'+m.t+'" width="'+(W-m.l-m.r)+'" height="'+(H-m.t-m.b)+'" fill="transparent"/>';
+  el.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" height="'+H+'" role="img">'+g+'</svg>';
+  const svg=el.querySelector('svg'),hit=el.querySelector('.hit'),xh=el.querySelector('.xh');
+  hit.addEventListener('mousemove',e=>{const b=svg.getBoundingClientRect(),sx=(e.clientX-b.left)*W/b.width;const i=n===1?0:Math.max(0,Math.min(n-1,Math.round((sx-m.l)/((W-m.l-m.r)/(n-1)))));
+    xh.setAttribute('x1',x(i));xh.setAttribute('x2',x(i));xh.setAttribute('opacity',1);
+    series.forEach((s,k)=>{const d=el.querySelector('.dot'+k);if(s.values[i]==null){d.setAttribute('opacity',0);return}d.setAttribute('cx',x(i));d.setAttribute('cy',y(s.values[i]));d.setAttribute('opacity',1)});showTip(tipFn(i),e.clientX,e.clientY)});
+  hit.addEventListener('mouseleave',()=>{hideTip();xh.setAttribute('opacity',0);series.forEach((s,k)=>el.querySelector('.dot'+k).setAttribute('opacity',0))});
+}
+function rsiRefs(){const r=[];const mx=$('maxRsi').value,h=$('holdRsi').value,ex=$('exitRsi').value,b=$('bookRsi').value;
+  if(mx)r.push({v:+mx,color:'#ff6b6b',label:'Skip buys ≥ '+mx});if(h)r.push({v:+h,color:'#ffd98a',label:'Ride ≥ '+h});if(h&&ex)r.push({v:+ex,color:'#32d583',label:'Book ridden ≥ '+ex});
+  if($('holdings').value.trim()&&b)r.push({v:+b,color:'#6ea8fe',label:'Book your shares ≥ '+b});return r}
+const rsiFmt=v=>String(Math.round(v));
+function renderEq(){const d=RES.result.days;lineChart($('eqChart'),[{color:'var(--s1)',values:d.map(r=>r.realized_cum)},{color:'var(--s2)',values:d.map(r=>r.equity)}],d.map(r=>shortDay(r.day)),
+  i=>'<b>'+dfmt(d[i].day)+'</b><br>Booked <b>'+signed(d[i].realized_cum)+'</b><br>Incl. open <b>'+signed(d[i].equity)+'</b><br>'+d[i].open_count+' open • RSI at close '+(d[i].rsi??'-'),{zero:true})}
+function renderPx(){const p=RES.result.price;lineChart($('pxChart'),[{color:'var(--s1)',values:p.map(r=>r.close)}],p.map(r=>shortDay(r.ts)),i=>'<b>'+esc(p[i].ts)+'</b><br>₹'+px(p[i].close)+' • RSI '+(p[i].rsi??'-'))}
+function renderRsi(){const p=RES.result.price,refs=rsiRefs();
+  $('rsiLegend').innerHTML='<span><i style="background:var(--s3)"></i>RSI (sampled)</span>'+refs.map(r=>'<span><i style="background:'+r.color+'"></i>'+r.label+'</span>').join('');
+  lineChart($('rsiChart'),[{color:'var(--s3)',values:p.map(r=>r.rsi),w:1.5}],p.map(r=>shortDay(r.ts)),i=>'<b>'+esc(p[i].ts)+'</b><br>RSI '+(p[i].rsi??'-')+' • ₹'+px(p[i].close),{domain:[0,100,25],fmt:rsiFmt,refs,h:200,l:40})}
+let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{if(RES){renderEq();renderPx();renderRsi()}if(NOW)renderNowChart()},150)});
+function renderDays(){const d=RES.result.days.slice().reverse();
+  $('dayTable').innerHTML='<tr><th>Date</th><th class="num">Close</th><th class="num">RSI at close</th><th class="num">Entries</th><th class="num">Sales</th><th class="num">Booked that day</th><th class="num">Extra from riding</th><th class="num">Booked so far</th><th class="num">Open</th><th class="num">Open P&L</th></tr>'+
+  d.map(r=>'<tr><td>'+dfmt(r.day)+'</td><td class="num">'+px(r.close)+'</td><td class="num">'+(r.rsi??'-')+'</td><td class="num">'+r.entries+'</td><td class="num">'+r.exits+'</td><td class="num '+cls(r.net)+'">'+signed(r.net)+'</td><td class="num '+cls(r.extra)+'">'+(r.extra?signed(r.extra):'-')+'</td><td class="num">'+signed(r.realized_cum)+'</td><td class="num">'+r.open_count+'</td><td class="num '+cls(r.unrealized)+'">'+signed(r.unrealized)+'</td></tr>').join('')}
+function renderTrades(){const t=RES.result.trades,show=t.slice(0,500);$('tradeMeta').textContent='('+t.length+(t.length>500?' • newest 500 shown':'')+')';
+  if(!t.length){$('tradeTable').innerHTML='<tr><td class="empty">No entries were made with these settings.</td></tr>';return}
+  $('tradeTable').innerHTML='<tr><th>Bought</th><th class="num">RSI at buy</th><th class="num">Buy price</th><th class="num">Shares</th><th class="num">Target</th><th>How it ended</th><th>Sold</th><th class="num">Sell price</th><th class="num">Profit</th><th class="num">Extra vs target</th><th class="num">Held</th></tr>'+
+  show.map(r=>'<tr><td>'+esc(r.entry_ts)+'</td><td class="num">'+(r.rsi_at_entry??'-')+'</td><td class="num">'+px(r.entry)+'</td><td class="num">'+r.qty+'</td><td class="num">'+px(r.target)+'</td><td><span class="pill '+(r.status==='Open'?'wait':'')+'">'+esc(r.reason)+'</span></td><td>'+esc(r.exit_ts||'-')+'</td><td class="num">'+px(r.exit)+'</td>'+
+  '<td class="num '+cls(r.net)+'">'+signed(r.net)+(r.status==='Open'?'<div class="meta">at last price</div>':'')+'</td><td class="num '+cls(r.extra)+'">'+(r.extra?signed(r.extra):'-')+'</td><td class="num">'+hrs(r.hold_hours)+'</td></tr>').join('')}
+
+// ---------- optimizer ----------
+let optTimer=null;
+async function optimize(){
+  $('runMsg').textContent='';
+  let b;try{b=body()}catch(e){$('runMsg').textContent=e.message;return}
+  busy('optBtn',true,'Searching…');
+  $('optCard').classList.remove('hide');$('optOut').classList.add('hide');$('optProgress').classList.remove('hide');$('optBar').style.width='0';$('optMsg').textContent='Starting…';
+  $('optSym').textContent=curSym().symbol;$('optMeta').textContent='';$('optCard').scrollIntoView({behavior:'smooth',block:'start'});
+  try{const j=await post('/iifl/api/analysis-rsi/optimize',b);pollJob(j.job_id)}catch(e){$('optMsg').textContent=e.message;busy('optBtn',false)}
+}
+async function pollJob(id){
+  let j;try{j=await api('/iifl/api/analysis-rsi/job/'+id)}catch(e){$('optMsg').textContent=e.message;busy('optBtn',false);return}
+  $('optBar').style.width=Math.round(100*j.done/Math.max(1,j.total))+'%';$('optMsg').textContent=j.message+' ('+j.done+' / '+j.total+')';
+  if(j.state==='RUNNING'){optTimer=setTimeout(()=>pollJob(id),1200);return}
+  busy('optBtn',false);
+  if(j.state==='ERROR'){$('optMsg').textContent='✗ '+j.message;return}
+  OPT=j.result;renderOpt();
+}
+const VERDICT={RELIABLE:['','✓ Reliable','Also beat your current settings on unseen days'],OK:['wait','Promising','Profitable on unseen days, but not better than your current settings'],
+  UNVERIFIED:['off','Not verified','Need 10+ days of data to check on unseen days'],PAST_ONLY:['bad','Past only','Did not hold up on the last 30% of days – don\'t rely on it']};
+function setupTxt(s){return s.timeframe+' • '+s.target_pct+'% • buy if RSI < '+rsiTxt(s.max_entry_rsi)+(s.hold_rsi!=null?' • ride ≥ '+s.hold_rsi+', book ≥ '+s.exit_rsi:' • no riding')}
+function renderOpt(){
+  const o=OPT,sp=o.split,top=o.top,base=o.baseline;
+  $('optProgress').classList.add('hide');$('optOut').classList.remove('hide');
+  $('optMeta').textContent='('+o.tested+' setups tested • '+dfmt(o.meta.from)+' – '+dfmt(o.meta.to)+(sp.enabled?' • tuned on '+dfmt(sp.train_from)+' – '+dfmt(sp.train_to)+', checked on '+dfmt(sp.test_from)+' – '+dfmt(sp.test_to):'')+')';
+  if(!top.length){$('optKpis').innerHTML='<div class="empty">No setup made at least '+o.min_trades+' trades. Try a longer date range or more data.</div>';$('optTable').innerHTML='';$('tfTable').innerHTML='';renderOptHold();return}
+  const best=top[0],bs=best.settings,v=VERDICT[best.verdict];
+  $('optKpis').innerHTML=kpi('Best setup',bs.timeframe+' • '+bs.target_pct+'% target','Buy only if RSI < '+rsiTxt(bs.max_entry_rsi)+(bs.hold_rsi!=null?' • ride at RSI ≥ '+bs.hold_rsi+', book at ≥ '+bs.exit_rsi:' • sell at target'),'',true)+
+    kpi('Verdict','<span class="pill '+v[0]+'">'+v[1]+'</span>',v[2])+
+    kpi('Booked profit (full period)',signed(best.full.net_pnl),'Your current settings: '+signed(base.full.net_pnl),cls(best.full.net_pnl))+
+    kpi('Return on capital',pct(best.full.return_on_peak_pct),'Current: '+pct(base.full.return_on_peak_pct),cls(best.full.return_on_peak_pct))+
+    kpi('Worst dip',best.full.max_drawdown?'-'+inr(best.full.max_drawdown):'₹0','Current: '+(base.full.max_drawdown?'-'+inr(base.full.max_drawdown):'₹0'),best.full.max_drawdown?'neg':'')+
+    kpi('Stuck at a loss at end',best.full.open_count+' lots',(best.full.open_loss?'-'+inr(best.full.open_loss,0):'₹0')+' • current '+base.full.open_count+' lots');
+  const row=(r,isBase)=>{const s=r.settings,vv=VERDICT[r.verdict]||['off','Your current',''];
+    return '<tr'+(isBase?' class="baseline"':'')+'><td>'+(isBase?'<b>Your current settings (no RSI)</b>':'<span class="pill '+vv[0]+'">'+vv[1]+'</span>')+'</td><td>'+s.timeframe+'</td><td class="num">'+s.target_pct+'%</td><td class="num">'+rsiTxt(s.max_entry_rsi)+'</td><td class="num">'+rsiTxt(s.hold_rsi)+'</td><td class="num">'+(s.hold_rsi!=null?s.exit_rsi:'-')+'</td>'+
+      '<td class="num '+cls(r.train.return_on_peak_pct)+'">'+pct(r.train.return_on_peak_pct)+'</td><td class="num '+(r.test?cls(r.test.return_on_peak_pct):'')+'">'+(r.test?pct(r.test.return_on_peak_pct):'-')+'</td>'+
+      '<td class="num '+cls(r.full.net_pnl)+'">'+signed(r.full.net_pnl)+'</td><td class="num">'+(r.full.max_drawdown?'<span class="neg">-'+inr(r.full.max_drawdown,0)+'</span>':'₹0')+'</td><td class="num">'+r.full.open_count+'</td><td class="num">'+r.full.closed+'</td><td class="num">'+inr(r.full.peak_capital,0)+'</td>'+
+      '<td>'+(isBase?'':'<button class="secondary btn-sm" onclick="useSetup('+top.indexOf(r)+')">Use these</button>')+'</td></tr>'};
+  $('optTable').innerHTML='<tr><th>Verdict</th><th>Timeframe</th><th class="num">Target</th><th class="num">Buy only if RSI &lt;</th><th class="num">Ride at RSI ≥</th><th class="num">Book at RSI ≥</th><th class="num">Return (tuning days)</th><th class="num">Return (unseen days)</th><th class="num">Booked profit</th><th class="num">Worst dip</th><th class="num">Stuck lots</th><th class="num">Trades</th><th class="num">Peak capital</th><th></th></tr>'+
+    top.map(r=>row(r,false)).join('')+row(base,true);
+  $('tfTable').innerHTML='<tr><th>Timeframe</th><th>Best setup</th><th class="num">Return (tuning days)</th><th class="num">Booked profit</th><th class="num">Worst dip</th><th class="num">Trades</th></tr>'+
+    ['1m','5m','15m'].map(t=>{const r=o.by_timeframe[t];if(!r)return '<tr><td>'+t+'</td><td colspan="5" class="meta">Too few trades</td></tr>';
+      return '<tr><td><b>'+t+'</b></td><td>'+esc(setupTxt(r.settings))+'</td><td class="num '+cls(r.train.return_on_peak_pct)+'">'+pct(r.train.return_on_peak_pct)+'</td><td class="num '+cls(r.train.net_pnl)+'">'+signed(r.train.net_pnl)+'</td><td class="num">'+(r.train.max_drawdown?'<span class="neg">-'+inr(r.train.max_drawdown,0)+'</span>':'₹0')+'</td><td class="num">'+r.train.closed+'</td></tr>'}).join('');
+  renderOptHold();
+}
+function renderOptHold(){
+  const h=OPT.holdings;$('optHoldWrap').classList.toggle('hide',!h);if(!h)return;
+  $('optHold').innerHTML='<tr><th class="num">Sell at RSI ≥</th><th class="num">Parts</th><th class="num">Shares sold</th><th class="num">Still held</th><th class="num">Profit booked</th><th class="num">Value at end</th><th class="num">vs just holding</th><th></th></tr>'+
+    h.map((r,i)=>'<tr><td class="num"><b>'+r.book_rsi+'</b></td><td class="num">'+r.parts+'</td><td class="num">'+r.sold_qty+'</td><td class="num">'+r.remaining+'</td><td class="num '+cls(r.booked_profit)+'">'+signed(r.booked_profit)+'</td><td class="num">'+inr(r.end_value,0)+'</td><td class="num '+cls(r.vs_just_holding)+'">'+signed(r.vs_just_holding)+'</td><td><button class="secondary btn-sm" onclick="useHold('+i+')">Use these</button></td></tr>').join('');
+  const b=h[0];$('optHoldNote').textContent=b.vs_just_holding<0?'In this period the price mostly kept rising, so selling later (higher RSI, more parts) left more money. Booking at high RSI protects you when the price turns down.':'Booking at high RSI beat simply holding in this period.';
+}
+function useSetup(i){const s=OPT.top[i].settings;$('tf').value=s.timeframe;$('target').value=s.target_pct;$('maxRsi').value=s.max_entry_rsi??'';$('holdRsi').value=s.hold_rsi??'';if(s.exit_rsi!=null)$('exitRsi').value=s.exit_rsi;updateHints();runAnalysis()}
+function useHold(i){const r=OPT.holdings[i];$('bookRsi').value=r.book_rsi;$('bookParts').value=r.parts;updateHints();runAnalysis()}
+
+// ---------- RSI now ----------
+let NOW=null,nowTimer=null;
+async function checkNow(auto){
+  if(!auto){$('runMsg').textContent='';busy('nowBtn',true,'Checking…')}
+  try{NOW=await post('/iifl/api/analysis-rsi/now',body());renderNow()}catch(e){if(!auto)$('runMsg').textContent=e.message}
+  if(!auto)busy('nowBtn',false);
+  clearTimeout(nowTimer);if(NOW&&NOW.source.startsWith('live'))nowTimer=setTimeout(()=>checkNow(true),60000);
+}
+function renderNow(){
+  const n=NOW;$('nowCard').classList.remove('hide');
+  $('nowMeta').textContent='('+n.symbol+' • candle '+n.ts+' • ₹'+px(n.price)+' • checked '+n.checked_at+')';
+  $('nowRsi').textContent=n.rsi;$('nowRsi').className='big '+(n.rsi>=70?'neg':(n.rsi<=30?'pos':''));
+  $('nowTrend').textContent=(n.trend==='rising'?'▲ rising':n.trend==='falling'?'▼ falling':'■ flat')+' (was '+n.rsi_prev+')';
+  $('nowNeedle').style.left=Math.max(0,Math.min(100,n.rsi))+'%';
+  $('nowEntry').innerHTML='<span class="pill '+(n.entry.state==='OK'?'':'bad')+'">'+(n.entry.state==='OK'?'Allowed':'Blocked')+'</span> <span class="meta">'+esc(n.entry.msg)+'</span>';
+  $('nowSource').innerHTML='Source: '+esc(n.source)+(n.source.startsWith('live')?' • refreshes every minute':'')+(n.live_note?'<div class="err">'+esc(n.live_note)+'</div>':'');
+  $('nowHoldWrap').classList.toggle('hide',!n.holdings.length);
+  $('nowHold').innerHTML='<tr><th class="num">Shares</th><th class="num">Bought at</th><th class="num">Part</th><th class="num">Sell at RSI ≥</th><th class="num">Min price</th><th>Action</th><th>Why</th><th class="num">Profit if sold now</th></tr>'+
+    n.holdings.map(h=>'<tr><td class="num">'+h.qty+'</td><td class="num">'+px(h.buy)+'</td><td class="num">'+h.part+'</td><td class="num">'+h.level+'</td><td class="num">'+px(h.min_px)+'</td><td><span class="pill '+(h.action==='HOLD'?'off':'')+'">'+h.action+'</span></td><td class="meta" style="white-space:normal">'+esc(h.why)+'</td><td class="num '+cls(h.profit_now)+'">'+signed(h.profit_now)+'</td></tr>').join('');
+  renderNowChart();
+}
+function renderNowChart(){const r=NOW.recent;lineChart($('nowChart'),[{color:'var(--s3)',values:r.map(x=>x.rsi)}],r.map(x=>x.ts.slice(11)),i=>'<b>'+esc(r[i].ts)+'</b><br>RSI '+(r[i].rsi??'-')+' • ₹'+px(r[i].close),{domain:[0,100,25],fmt:rsiFmt,refs:rsiRefs(),h:180,l:40})}
+
+loadSyms();updateHints();
+</script>
+</body>
+</html>

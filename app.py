@@ -1015,6 +1015,11 @@ def api_analysis_run():
     return jsonify({"status": "Ok", "result": out})
 
 
+# ---- RSI Analysis tab (separate page; the Analysis tab above is unchanged) ----
+import rsi_analysis  # noqa: E402
+app.register_blueprint(rsi_analysis.bp)
+
+
 if __name__ == "__main__":
 
     app.run(

@@ -146,3 +146,16 @@ journalctl -u iifl-bot --since today | grep -E "ORDER_|FILLED|MISMATCH|ERROR"
 ## Before real money
 
 Rotate the IIFL **API secret** and the **dashboard password** (they were exposed during development), update `.env`, restart both services.
+
+## RSI Analysis tab (`/iifl/analysis-rsi`)
+
+Analysis only – no orders, no change to the live engine or the classic Analysis tab. Uses the 1-minute candles already downloaded there.
+
+```bash
+cd /root/iifl && source venv/bin/activate
+git pull --ff-only origin main
+python -m py_compile *.py
+python -m unittest tests.test_rsi_analysis
+systemctl restart iifl-web
+curl -s -o /dev/null -w "RSI page HTTP %{http_code}\n" http://127.0.0.1:5015/iifl/analysis-rsi   # 401 = OK (login required)
+```
