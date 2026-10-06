@@ -21,6 +21,18 @@ Exit ("ride the winners"), when hold_rsi is set:
     it; at the cap (entry * (1 + stretch x target%)) if that is reached.
   * price reaches target and RSI < hold_rsi -> sell at target (plain rule).
 
+Risk and volume rules (to keep the worst dip down; all optional):
+  * min_gap_pct + ladder_after: the first `ladder_after` lots buy freely as before; after
+    that, each extra lot must be at least X% below the LOWEST open lot. Entries spread
+    down a fall (a ladder) instead of all lots being bought at one level.
+  * trend_days: skip buys while the last close is below the average of the previous
+    N days' closing prices (stock in a downtrend).
+  * pause_loss_pct: skip buys while the open lots are down more than X% overall.
+  * vol_block_mult: skip a buy right after a red 1-minute candle whose volume was
+    >= X times the average of the 20 candles before it (heavy selling).
+  * vol_climax_mult: book a riding lot at the next open after a green candle with
+    volume >= X times average (buying climax / exhaustion).
+
 Pre-bought shares (holdings entered by the user):
   * split into 1-3 parts; part k is sold at the next open after a candle closes
     with RSI >= book_rsi + (k-1) * step AND close >= buy price x (1 + min profit%).
@@ -51,7 +63,10 @@ REASONS = {
     "RSI_FADE": "Sold on RSI fade",
     "FLOOR": "Fell back to target",
     "CAP": "Hit max stretch",
+    "VOL_CLIMAX": "Booked on volume climax",
 }
+VOL_AVG_BARS = 20
+RISK_WEIGHTS = {"profit": (0.25, 0.25), "balanced": (0.5, 0.5), "low_dip": (1.5, 1.0)}
 
 
 # ---------------------------------------------------------------- helpers
@@ -143,6 +158,38 @@ class Prepared:
         self.start = max(first_trade, min(self.n, warmup))
         self.minute = [_minutes(t) - SESSION_START for t in self.ts]
         self.days = sorted({t[:10] for t in self.ts[self.start:]})
+        # volume: average of the VOL_AVG_BARS candles BEFORE each candle (None until available)
+        self.v = [float(k.get("volume") or 0) for k in candles]
+        self.has_volume = sum(1 for x in self.v if x > 0) > self.n * 0.5
+        self.vavg = [None] * self.n
+        run = 0.0
+        for i in range(self.n):
+            if i >= VOL_AVG_BARS:
+                self.vavg[i] = run / VOL_AVG_BARS
+                run -= self.v[i - VOL_AVG_BARS]
+            run += self.v[i]
+        # daily closes for the trend filter
+        self.day_of = []
+        self.day_close = []
+        last_day = None
+        for i, t in enumerate(self.ts):
+            d = t[:10]
+            if d != last_day:
+                self.day_close.append(None)
+                last_day = d
+            self.day_close[-1] = self.cl[i]
+            self.day_of.append(len(self.day_close) - 1)
+        self._trend = {}
+
+    def trend_ref(self, n_days):
+        """Per candle: average close of the n previous trading days (None if not enough history)."""
+        if n_days not in self._trend:
+            ref_by_day = []
+            for k in range(len(self.day_close)):
+                prev = self.day_close[max(0, k - n_days):k]
+                ref_by_day.append(sum(prev) / n_days if len(prev) == n_days else None)
+            self._trend[n_days] = [ref_by_day[d] for d in self.day_of]
+        return self._trend[n_days]
 
     def slice_days(self, days):
         """Index range [a, b) covering the given trading days (contiguous)."""
@@ -171,6 +218,14 @@ def simulate(prep, p, tf, a=None, b=None, detail=True, holdings=None):
     hold_rsi = p.get("hold_rsi")
     exit_rsi = p.get("exit_rsi")
     stretch = float(p.get("max_stretch") or 0)
+    gap = float(p.get("min_gap_pct") or 0) / 100.0
+    ladder_after = int(p.get("ladder_after") or 0)
+    trend_days = int(p.get("trend_days") or 0)
+    pause_loss = float(p.get("pause_loss_pct") or 0) / 100.0
+    vol_block = float(p.get("vol_block_mult") or 0) if prep.has_volume else 0.0
+    vol_climax = float(p.get("vol_climax_mult") or 0) if prep.has_volume else 0.0
+    trend = prep.trend_ref(trend_days) if trend_days > 0 else None
+    V, VA = prep.v, prep.vavg
     if hold_rsi is not None and exit_rsi is None:
         exit_rsi = 101.0
     step = TF_MIN[tf]
@@ -184,7 +239,8 @@ def simulate(prep, p, tf, a=None, b=None, detail=True, holdings=None):
     realized = 0.0
     peak_cap = 0.0
     max_open_seen = 0
-    skips = {"max_open": 0, "capital": 0, "batch_wait": 0, "rsi_high": 0, "rsi_low": 0}
+    skips = {"max_open": 0, "capital": 0, "batch_wait": 0, "rsi_high": 0, "rsi_low": 0,
+             "gap": 0, "trend": 0, "loss_pause": 0, "volume": 0}
     entries = 0
     batch = {"no": 1, "bought": 0, "state": "BUYING", "trigger": None, "armed_at": -1}
     equity_peak = 0.0
@@ -272,6 +328,19 @@ def simulate(prep, p, tf, a=None, b=None, detail=True, holdings=None):
         if batch_size and batch["state"] in ("WAITING_SELL", "WAITING_DIP"):
             batch.update(state="WAITING_DIP", trigger=_tick(px * (1 - dip / 100.0), tick, "down"), armed_at=i)
 
+    def entry_risk_block(i, o):
+        """Risk / volume filters for a regular slot entry at candle i's open (uses closed candles only)."""
+        if trend is not None and i > 0 and trend[i] is not None and C[i - 1] < trend[i]:
+            return "trend"
+        if pause_loss and open_qty and (open_cost - C[i - 1] * open_qty) > pause_loss * open_cost:
+            return "loss_pause"
+        if vol_block and i > 0 and VA[i - 1] and C[i - 1] < O[i - 1] and V[i - 1] >= vol_block * VA[i - 1]:
+            return "volume"
+        if gap and lots and len(lots) >= ladder_after:
+            if o > min(x["entry"] for x in lots) * (1 - gap):
+                return "gap"
+        return None
+
     def new_batch():
         batch.update(no=batch["no"] + 1, bought=0, state="BUYING", trigger=None)
 
@@ -342,7 +411,12 @@ def simulate(prep, p, tf, a=None, b=None, detail=True, holdings=None):
                     skips["rsi_low"] += 1
                     used.add(key)
                 else:
-                    buy(o, i)
+                    why = entry_risk_block(i, o)
+                    if why:
+                        skips[why] += 1
+                        used.add(key)
+                    else:
+                        buy(o, i)
         # 5. re-buy level inside the candle
         if batch_size and batch["state"] == "WAITING_DIP" and lo_ <= batch["trigger"] and batch["armed_at"] != i:
             trig = batch["trigger"]
@@ -374,6 +448,9 @@ def simulate(prep, p, tf, a=None, b=None, detail=True, holdings=None):
                 if lot["ride"] and not lot["sell_next"]:
                     if r >= exit_rsi:
                         lot["sell_next"] = "RSI_PEAK"
+                        st["dirty"] = True
+                    elif vol_climax and VA[i] and c > o and V[i] >= vol_climax * VA[i]:
+                        lot["sell_next"] = "VOL_CLIMAX"
                         st["dirty"] = True
                     elif r < hold_rsi:
                         lot["sell_next"] = "RSI_FADE"
@@ -430,6 +507,12 @@ def simulate(prep, p, tf, a=None, b=None, detail=True, holdings=None):
         "skipped_batch_wait": skips["batch_wait"],
         "skipped_rsi_high": skips["rsi_high"],
         "skipped_rsi_low": skips["rsi_low"],
+        "skipped_gap": skips["gap"],
+        "skipped_trend": skips["trend"],
+        "skipped_loss_pause": skips["loss_pause"],
+        "skipped_volume": skips["volume"],
+        "max_drawdown_pct": round(100 * max_dd / peak_cap, 2) if peak_cap else 0.0,
+        "has_volume": prep.has_volume,
         "exits_by_reason": by_reason,
         "extra_from_rsi": round(extra_total, 2),
         "rides": st["rides"],
@@ -439,7 +522,7 @@ def simulate(prep, p, tf, a=None, b=None, detail=True, holdings=None):
         "price_change_pct": round(100 * (last_close - O[a]) / O[a], 2) if a < b and O[a] else 0.0,
         "oldest_open_hours": round(_hours_between(TS[lots[0]["i"]], TS[b - 1]), 1) if lots else None,
     }
-    summary["score"] = score(summary)
+    summary["score"] = score(summary, p.get("risk") or "balanced")
     out = {"summary": summary}
     if hold_parts:
         out["holdings"] = _holdings_report(hold_parts, holdings, prep, last_close, charge_pct)
@@ -523,15 +606,17 @@ def min_trades(days):
     return max(5, min(20, 2 * days))
 
 
-def score(s):
-    """Risk-adjusted score: return on capital minus half the drawdown % and half the open-loss %."""
+def score(s, risk="balanced"):
+    """Risk-adjusted score: return on capital minus weighted worst-dip % and open-loss %.
+    risk: 'profit' (light penalty), 'balanced', 'low_dip' (heavy penalty on the worst dip)."""
     cap = s["peak_capital"]
     if not cap or s["closed"] < min_trades(s["trading_days"]):
         return None
+    w_dd, w_stuck = RISK_WEIGHTS.get(risk, RISK_WEIGHTS["balanced"])
     ret = 100.0 * s["net_pnl"] / cap
     dd = 100.0 * s["max_drawdown"] / cap
     stuck = 100.0 * s["open_loss"] / cap
-    return round(ret - 0.5 * dd - 0.5 * stuck, 3)
+    return round(ret - w_dd * dd - w_stuck * stuck, 3)
 
 
 # ---------------------------------------------------------------- optimizer
@@ -556,21 +641,65 @@ def grid_combos(grid=GRID):
     return out
 
 
-def _key(c):
-    return (c["timeframe"], c["target_pct"], c["max_entry_rsi"], c["hold_rsi"], c["exit_rsi"])
+RISK_KEYS = ("min_gap_pct", "ladder_after", "trend_days", "pause_loss_pct", "vol_block_mult")
+SETTING_KEYS = ("target_pct", "max_entry_rsi", "hold_rsi", "exit_rsi") + RISK_KEYS
 
 
-def optimize(prep, base, progress=None, top=5):
-    """Grid search with a 70/30 walk-forward check. base = user's fixed settings."""
+def risk_grid(has_volume, max_open):
+    ladders = [(0, 0)] + [(g, a) for g in (0.5, 1.0, 2.0)
+                          for a in sorted({max(1, max_open // 5), max(1, max_open // 2)})]
+    out = []
+    for (gap, after), trend, vol in itertools.product(ladders, [0, 5], [0, 2.0] if has_volume else [0]):
+        out.append({"min_gap_pct": gap, "ladder_after": after, "trend_days": trend, "pause_loss_pct": 0,
+                    "vol_block_mult": vol})
+    return out
+
+
+def dip_options(base_c, max_open):
+    """Variants of one setup that trade profit for a smaller worst dip."""
+    q = lambda f: max(1, int(round(max_open * f)))
+    rows = [("Your chosen setup", {}),
+            (f"Max open {q(0.75)} lots", {"max_open": q(0.75)}),
+            (f"Max open {q(0.5)} lots", {"max_open": q(0.5)}),
+            (f"Max open {q(0.25)} lots", {"max_open": q(0.25)})]
+    for g in (0.5, 1.0, 2.0):
+        rows.append((f"Ladder: after {q(0.2)} lots, each new lot {g}% below the lowest",
+                     {"min_gap_pct": g, "ladder_after": q(0.2)}))
+    rows += [("Skip buys below the 5-day average (downtrend)", {"trend_days": 5}),
+             ("Pause buys while open lots are down 5%+", {"pause_loss_pct": 5}),
+             ("Skip buys after heavy-selling volume (2×)", {"vol_block_mult": 2}),
+             (f"Combined: ladder 1% after {q(0.2)} + 5-day trend + volume",
+              {"min_gap_pct": 1.0, "ladder_after": q(0.2), "trend_days": 5, "vol_block_mult": 2})]
+    out = []
+    for label, ch in rows:
+        c = dict(base_c)
+        c.update(ch)
+        out.append((label, c))
+    return out
+
+
+def _group(c):
+    return (c["timeframe"], c["target_pct"], c["max_entry_rsi"])
+
+
+def optimize(prep, base, progress=None, top=5, risk="balanced"):
+    """Two-stage grid search with a 70/30 walk-forward check.
+
+    Stage 1: timeframe x target x entry RSI x hold/exit RSI (750 setups).
+    Stage 2: the 10 strongest distinct setups x dip-reducing / volume rules.
+    Ranked on the first 70% of days, checked on the last 30%, compared with the
+    user's current settings (no RSI, no risk rules)."""
     combos = grid_combos()
+    rgrid = risk_grid(prep.has_volume, int(base["max_open"]))
     days = prep.days
     split = len(days) >= 10
     train_days = days[: max(1, int(round(len(days) * 0.7)))] if split else days
     test_days = days[len(train_days):] if split else []
     ta, tb = prep.slice_days(train_days)
     va, vb = prep.slice_days(test_days) if split else (None, None)
-    total = len(combos) + (30 if split else 0) + 6
+    total = len(combos) + 10 * len(rgrid) + (60 if split else 30) + 3 + 2 * 12
     done = 0
+    plain_base = dict(base, risk=risk, **{k: 0 for k in RISK_KEYS})
 
     def tick_progress(msg):
         nonlocal done
@@ -579,41 +708,60 @@ def optimize(prep, base, progress=None, top=5):
             progress(done, total, msg)
 
     def run(c, a, b):
-        p = dict(base)
-        p.update({k: c[k] for k in ("target_pct", "max_entry_rsi", "hold_rsi", "exit_rsi")})
+        p = dict(plain_base)
+        p.update({k: c[k] for k in SETTING_KEYS + ("max_open",) if k in c})
         return simulate(prep, p, c["timeframe"], a, b, detail=False)["summary"]
 
+    # ---- stage 1: RSI settings
     train = []
     for c in combos:
-        s = run(c, ta, tb)
-        train.append((c, s))
-        tick_progress("Testing settings on the first 70% of days")
+        c = dict(c, **{k: 0 for k in RISK_KEYS})
+        train.append((c, run(c, ta, tb)))
+        tick_progress("Stage 1: RSI settings on the first 70% of days")
     ranked = sorted([t for t in train if t[1]["score"] is not None], key=lambda t: -t[1]["score"])
+    seeds, groups = [], set()
+    for c, s_ in ranked:
+        if _group(c) not in groups:
+            groups.add(_group(c))
+            seeds.append(c)
+        if len(seeds) == 10:
+            break
+
+    # ---- stage 2: dip-reducing and volume rules on the strongest setups
+    cands = list(train)
+    for c in seeds:
+        for rg in rgrid:
+            if not any(rg.values()):
+                tick_progress("Stage 2: dip and volume rules")
+                continue
+            c2 = dict(c, **rg)
+            cands.append((c2, run(c2, ta, tb)))
+            tick_progress("Stage 2: dip and volume rules")
+    ranked = sorted([t for t in cands if t[1]["score"] is not None], key=lambda t: -t[1]["score"])
+
+    # best variant per distinct setup (30), plus the lowest-dip variants of the same setups
     shortlist, groups = [], set()
-    for c, s in ranked:                      # best variant of the 30 strongest distinct setups
-        g = (c["timeframe"], c["target_pct"], c["max_entry_rsi"])
-        if g in groups:
-            continue
-        groups.add(g)
-        shortlist.append((c, s))
+    for c, s_ in ranked:
+        if _group(c) not in groups:
+            groups.add(_group(c))
+            shortlist.append((c, s_))
         if len(shortlist) == 30:
             break
 
-    results = []
-    for c, s_train in shortlist:
+    def check(c, s_train):
         s_test = run(c, va, vb) if split else None
-        if split:
-            tick_progress("Checking the best settings on the last 30% of days")
+        tick_progress("Checking on the last 30% of days (unseen)")
         s_full = run(c, prep.start, prep.n)
-        results.append({"settings": c, "train": _brief(s_train), "test": _brief(s_test) if s_test else None,
-                        "full": _brief(s_full)})
+        tick_progress("Checking on the last 30% of days (unseen)")
+        return {"settings": c, "train": _brief(s_train), "test": _brief(s_test) if s_test else None, "full": _brief(s_full)}
 
-    # baseline: the user's own settings with no RSI rules
-    base_c = {"timeframe": base.get("timeframe", "15m"), "target_pct": float(base["target_pct"]),
-              "max_entry_rsi": None, "hold_rsi": None, "exit_rsi": None}
+    results = [check(c, st_) for c, st_ in shortlist]
+
+    base_c = dict({"timeframe": base.get("timeframe", "15m"), "target_pct": float(base["target_pct"]),
+                   "max_entry_rsi": None, "hold_rsi": None, "exit_rsi": None}, **{k: 0 for k in RISK_KEYS})
     baseline = {"settings": base_c, "train": _brief(run(base_c, ta, tb)),
                 "test": _brief(run(base_c, va, vb)) if split else None, "full": _brief(run(base_c, prep.start, prep.n))}
-    for _ in range(6):
+    for _ in range(3):
         tick_progress("Comparing with your current settings")
 
     b_test = (baseline["test"] or {}).get("score")
@@ -631,25 +779,30 @@ def optimize(prep, base, progress=None, top=5):
         r["rank_score"] = round(0.5 * r["train"]["score"] + 0.5 * tscore, 3) if split else r["train"]["score"]
     order = {"RELIABLE": 0, "OK": 1, "UNVERIFIED": 1, "PAST_ONLY": 2}
     results.sort(key=lambda r: (order[r["verdict"]], -r["rank_score"]))
-    # keep one row per distinct setup (timeframe, target, entry filter) so suggestions differ
-    seen, distinct = set(), []
-    for r in results:
-        k = (r["settings"]["timeframe"], r["settings"]["target_pct"], r["settings"]["max_entry_rsi"])
-        if k not in seen:
-            seen.add(k)
-            distinct.append(r)
-    results = distinct
 
-    # best timeframe overall (best score per timeframe on the full period)
+    # ways to cut the worst dip, applied to the top setup (full period + unseen days)
+    dips = []
+    if results:
+        best_c = dict(results[0]["settings"])
+        for label, c in dip_options(best_c, int(base["max_open"])):
+            full = run(c, prep.start, prep.n)
+            tick_progress("Measuring ways to cut the worst dip")
+            test = run(c, va, vb) if split else None
+            tick_progress("Measuring ways to cut the worst dip")
+            ratio = round(full["net_pnl"] / full["max_drawdown"], 2) if full["max_drawdown"] > 0 else None
+            dips.append({"label": label, "settings": c, "full": _brief(full), "test": _brief(test) if test else None,
+                         "profit_per_dip": ratio})
+
     by_tf = {}
-    for c, s in train:
-        if s["score"] is None:
+    for c, s_ in cands:
+        if s_["score"] is None:
             continue
-        if c["timeframe"] not in by_tf or s["score"] > by_tf[c["timeframe"]][1]["score"]:
-            by_tf[c["timeframe"]] = (c, s)
+        if c["timeframe"] not in by_tf or s_["score"] > by_tf[c["timeframe"]][1]["score"]:
+            by_tf[c["timeframe"]] = (c, s_)
     tf_table = {tf: {"settings": v[0], "train": _brief(v[1])} for tf, v in by_tf.items()}
 
-    return {"top": results[:top], "baseline": baseline, "by_timeframe": tf_table, "tested": len(combos),
+    return {"top": results[:top], "dip_options": dips, "baseline": baseline, "by_timeframe": tf_table,
+            "tested": len(cands), "risk": risk, "has_volume": prep.has_volume,
             "split": {"train_from": train_days[0] if train_days else None, "train_to": train_days[-1] if train_days else None,
                       "test_from": test_days[0] if test_days else None, "test_to": test_days[-1] if test_days else None,
                       "enabled": split},
@@ -657,8 +810,9 @@ def optimize(prep, base, progress=None, top=5):
 
 
 def _brief(s):
-    keys = ("net_pnl", "return_on_peak_pct", "max_drawdown", "open_count", "open_loss", "closed", "entries",
-            "peak_capital", "extra_from_rsi", "score", "total_pnl", "trading_days", "skipped_rsi_high", "skipped_rsi_low")
+    keys = ("net_pnl", "return_on_peak_pct", "max_drawdown", "max_drawdown_pct", "open_count", "open_loss", "closed",
+            "entries", "peak_capital", "extra_from_rsi", "score", "total_pnl", "trading_days", "skipped_rsi_high",
+            "skipped_rsi_low", "skipped_gap", "skipped_trend", "skipped_loss_pause", "skipped_volume")
     return {k: s.get(k) for k in keys}
 
 
@@ -686,7 +840,8 @@ def run(candles, params, trade_from=None, holdings=None):
     tf = params.get("timeframe", "15m")
     main = simulate(prep, params, tf, detail=True, holdings=holdings)
     compare = {t: simulate(prep, params, t, detail=False)["summary"] for t in TIMEFRAMES}
-    no_rsi = dict(params, max_entry_rsi=None, min_entry_rsi=None, hold_rsi=None, exit_rsi=None)
+    no_rsi = dict(params, max_entry_rsi=None, min_entry_rsi=None, hold_rsi=None, exit_rsi=None,
+                  vol_climax_mult=0, **{k: 0 for k in RISK_KEYS})
     plain = simulate(prep, no_rsi, tf, detail=False)["summary"]
     return {"result": main, "compare": compare, "plain": plain, "warmup_from": prep.ts[0] if prep.n else None,
             "trade_from": prep.ts[prep.start] if prep.start < prep.n else None}
@@ -701,10 +856,28 @@ def current_signal(candles, params, holdings=None, period=DEFAULT_PERIOD):
     now, prev = r[-1], r[-2]
     price = closes[-1]
     max_rsi, min_rsi = params.get("max_entry_rsi"), params.get("min_entry_rsi")
+    vols = [float(k.get("volume") or 0) for k in candles]
+    has_vol = sum(1 for x in vols[-200:] if x > 0) > min(200, len(vols)) * 0.5
+    vol_avg = sum(vols[-21:-1]) / 20 if len(vols) >= 21 else None
+    vol_ratio = round(vols[-1] / vol_avg, 2) if has_vol and vol_avg else None
+    trend_days = int(params.get("trend_days") or 0)
+    trend_ref = None
+    if trend_days:
+        day_close = OrderedDict()
+        for k in candles:
+            day_close[k["ts"][:10]] = float(k["close"])
+        prev_days = list(day_close.values())[:-1][-trend_days:]
+        if len(prev_days) == trend_days:
+            trend_ref = sum(prev_days) / trend_days
+    vb = float(params.get("vol_block_mult") or 0)
     if max_rsi is not None and now >= max_rsi:
         entry = ("BLOCKED", f"RSI {now:.1f} ≥ {max_rsi} – too high, skip new buys")
     elif min_rsi is not None and now <= min_rsi and not now > prev:
         entry = ("BLOCKED", f"RSI {now:.1f} ≤ {min_rsi} and not turning up yet – wait")
+    elif trend_ref is not None and price < trend_ref:
+        entry = ("BLOCKED", f"Price ₹{price:.2f} below its {trend_days}-day average ₹{trend_ref:.2f} – downtrend")
+    elif vb and vol_ratio is not None and closes[-1] < float(candles[-1]["open"]) and vol_ratio >= vb:
+        entry = ("BLOCKED", f"Heavy selling: red candle with {vol_ratio}× average volume")
     else:
         entry = ("OK", f"RSI {now:.1f} – entries allowed")
     hold_msgs = []
@@ -731,5 +904,7 @@ def current_signal(candles, params, holdings=None, period=DEFAULT_PERIOD):
     return {"ts": candles[-1]["ts"], "price": price, "rsi": round(now, 1), "rsi_prev": round(prev, 1),
             "trend": "rising" if now > prev else ("falling" if now < prev else "flat"),
             "entry": {"state": entry[0], "msg": entry[1]}, "holdings": hold_msgs,
-            "recent": [{"ts": candles[i]["ts"], "close": closes[i], "rsi": _r1(r[i])}
+            "volume": vols[-1] if has_vol else None, "volume_ratio": vol_ratio,
+            "trend_ref": round(trend_ref, 2) if trend_ref else None, "trend_days": trend_days,
+            "recent": [{"ts": candles[i]["ts"], "close": closes[i], "rsi": _r1(r[i]), "volume": vols[i]}
                        for i in range(max(0, len(candles) - 120), len(candles))]}

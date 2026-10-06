@@ -99,6 +99,16 @@
       <div class="f"><label>Max stretch (× target)</label><input type="number" id="stretch" value="3" min="0" step="0.5"><div class="hint" id="stretchHint">0 = no cap</div></div>
     </div>
 
+    <div class="section-title">Dip control &amp; volume (optional)</div>
+    <div class="grid">
+      <div class="f"><label>Ladder: each extra lot ≥ X% below the lowest (blank = off)</label><input type="number" id="gap" min="0" step="0.25" placeholder="off"><div class="hint">Spreads buys down a fall</div></div>
+      <div class="f"><label>Ladder starts after this many open lots</label><input type="number" id="ladderAfter" value="10" min="0" step="1"><div class="hint" id="ladderHint2">First lots buy freely as before</div></div>
+      <div class="f"><label>Skip buys below the N-day average</label><select id="trendDays"><option value="0">Off</option><option value="3">3 days</option><option value="5">5 days</option><option value="10">10 days</option></select><div class="hint">Downtrend filter</div></div>
+      <div class="f"><label>Pause buys while open lots are down ≥ % (blank = off)</label><input type="number" id="pauseLoss" min="0" step="0.5" placeholder="off"><div class="hint">Stops adding to a losing pile</div></div>
+      <div class="f"><label>Skip buys after heavy-selling volume ≥ × average (blank = off)</label><input type="number" id="volBlock" min="0" step="0.5" placeholder="off"><div class="hint">Red 1m candle with a volume spike</div></div>
+      <div class="f"><label>Book ridden lots on volume climax ≥ × average (blank = off)</label><input type="number" id="volClimax" min="0" step="0.5" placeholder="off"><div class="hint">Green 1m candle with a volume spike</div></div>
+    </div>
+
     <div class="section-title">Shares you already hold (optional)</div>
     <div class="grid">
       <div class="f" style="grid-column:span 2"><label>One line each: quantity @ buy price</label><textarea id="holdings" placeholder="100 @ 2450.50&#10;50 @ 2390"></textarea><div class="hint" id="holdHint">These are booked only at high RSI and never below your minimum profit</div></div>
@@ -110,6 +120,7 @@
 
     <div class="actions">
       <button class="go" id="runBtn" onclick="runAnalysis()">▶ Run analysis</button>
+      <select id="risk" style="width:auto"><option value="balanced" selected>Search for: Balanced</option><option value="low_dip">Search for: Lower worst dip</option><option value="profit">Search for: Max profit</option></select>
       <button class="purple" id="optBtn" onclick="optimize()">✨ Find best settings</button>
       <button class="primary" id="nowBtn" onclick="checkNow()">⚡ Check RSI now</button>
       <span class="err" id="runMsg"></span>
@@ -124,6 +135,7 @@
         <div style="display:flex;align-items:baseline;gap:14px"><span class="big" id="nowRsi">-</span><span id="nowTrend" class="meta"></span></div>
         <div class="gauge"><i id="nowNeedle"></i></div><div class="gscale"><span>0</span><span>30</span><span>50</span><span>70</span><span>100</span></div>
         <p style="margin:14px 0 6px">New bot entries: <span id="nowEntry"></span></p>
+        <p class="meta" id="nowExtra" style="margin:0 0 6px"></p>
         <div class="meta" id="nowSource"></div>
       </div>
       <div><div class="legend"><span><i style="background:var(--s3)"></i>1-minute RSI, last 2 hours</span></div><div class="chart" id="nowChart"></div></div>
@@ -139,6 +151,9 @@
       <div class="kpis" id="optKpis"></div>
       <h3>Top setups <span class="meta">(each a different timeframe / target / entry filter; ranked on the first 70% of days, checked on the last 30%)</span></h3>
       <div class="scroll"><table id="optTable"></table></div>
+      <h3>Ways to cut the worst dip <span class="meta">(applied to the top setup • full period • higher "profit per ₹1 of dip" = more efficient)</span></h3>
+      <div class="scroll"><table id="dipTable"></table></div>
+      <p class="meta">The worst dip grows with the money you keep invested: halving max open lots roughly halves both profit and dip. A rule is worth using when it lowers the dip % of capital or raises profit per ₹1 of dip.</p>
       <h3>Best per timeframe</h3>
       <div class="scroll"><table id="tfTable"></table></div>
       <div id="optHoldWrap" class="hide"><h3>Best way to sell your existing shares</h3><div class="scroll"><table id="optHold"></table></div><p class="meta" id="optHoldNote"></p></div>
@@ -173,6 +188,7 @@
     <div class="note">
       <b>How this test works.</b> Same rules as the bot (a buy at the start of every slot at that minute's open, its own target per entry, no stop loss, positions held overnight, max open / capital / batch limits), plus RSI.
       RSI is Wilder RSI on 1-minute closes. Every decision uses the RSI of the candle that had already <b>closed</b> – nothing from the future. Signals raised at a candle's close are executed at the next candle's open.
+      Dip rules: the ladder lets the first lots buy freely, then each extra lot must be X% below the lowest open lot; the trend filter compares the last close with the average of previous days' closes; volume rules compare a 1-minute candle's volume with the 20 candles before it.
       A ridden lot's target becomes its floor; it is sold at the RSI peak, when RSI fades, at the floor, or at the max stretch. The first ~10 days before your start date are loaded only to warm up RSI.
       When 1-minute data can't tell which happened first, the less favourable order is assumed. Real fills can differ by a tick or two. Past results don't guarantee future results.
     </div>
@@ -241,7 +257,8 @@ function body(){
   const s=curSym(); if(!s) throw new Error('Fetch data for a script first');
   return {instrumentId:s.instrumentId,timeframe:$('tf').value,from:$('from').value,to:$('to').value,target_pct:$('target').value,shares:$('shares').value,
     max_open:$('maxOpen').value,capital_limit:$('capital').value,batch_size:$('batch').value,rebuy_dip_pct:$('dip').value,charges_pct:$('charges').value,
-    rsi_period:$('rsiPeriod').value,max_entry_rsi:$('maxRsi').value,min_entry_rsi:$('minRsi').value,hold_rsi:$('holdRsi').value,exit_rsi:$('exitRsi').value,max_stretch:$('stretch').value,
+    rsi_period:$('rsiPeriod').value,min_gap_pct:$('gap').value,ladder_after:$('ladderAfter').value,trend_days:$('trendDays').value,
+    pause_loss_pct:$('pauseLoss').value,vol_block_mult:$('volBlock').value,vol_climax_mult:$('volClimax').value,risk:$('risk').value,max_entry_rsi:$('maxRsi').value,min_entry_rsi:$('minRsi').value,hold_rsi:$('holdRsi').value,exit_rsi:$('exitRsi').value,max_stretch:$('stretch').value,
     holdings:$('holdings').value,book_rsi:$('bookRsi').value,book_parts:$('bookParts').value,book_step:$('bookStep').value,min_profit_pct:$('minProfit').value};
 }
 function busy(id,on,label){const b=$(id);if(on){b.dataset.t=b.textContent;b.textContent=label;b.disabled=true}else{b.textContent=b.dataset.t||b.textContent;b.disabled=false}}
@@ -266,10 +283,11 @@ function render(){
     kpi('Return on capital used',pct(s.return_on_peak_pct),'Plain: '+pct(pl.return_on_peak_pct),cls(s.return_on_peak_pct))+
     kpi('Peak capital needed',inr(s.peak_capital,0),'Plain: '+inr(pl.peak_capital,0))+
     kpi('Still open at end',s.open_count+' ('+s.open_qty+' sh)','Plain: '+pl.open_count+' • now '+signed(s.unrealized),cls(s.unrealized))+
-    kpi('Worst dip in profit',s.max_drawdown?'-'+inr(s.max_drawdown):'₹0.00','Plain: '+(pl.max_drawdown?'-'+inr(pl.max_drawdown):'₹0'),s.max_drawdown?'neg':'')+
+    kpi('Worst dip in profit',s.max_drawdown?'-'+inr(s.max_drawdown):'₹0.00',s.max_drawdown_pct+'% of capital • plain '+(pl.max_drawdown?'-'+inr(pl.max_drawdown,0):'₹0')+' ('+pl.max_drawdown_pct+'%)',s.max_drawdown?'neg':'')+
+    kpi('Buys held back by dip rules',(s.skipped_gap+s.skipped_trend+s.skipped_loss_pause+s.skipped_volume).toLocaleString('en-IN'),s.skipped_gap+' ladder • '+s.skipped_trend+' downtrend • '+s.skipped_loss_pause+' loss pause • '+s.skipped_volume+' volume'+(s.has_volume?'':' (no volume in data)'))+
     kpi('Avg hold',hrs(s.avg_hold_hours),'Longest '+hrs(s.max_hold_hours))+
     kpi('Stock moved',pct(s.price_change_pct),'₹'+px(s.first_price)+' → ₹'+px(s.last_price),cls(s.price_change_pct))+
-    kpi('How lots were sold',(r.TARGET+r.GAP_TARGET)+' at target',r.RSI_PEAK+' RSI peak • '+r.RSI_FADE+' RSI fade • '+r.FLOOR+' back to target • '+r.CAP+' max stretch');
+    kpi('How lots were sold',(r.TARGET+r.GAP_TARGET)+' at target',r.RSI_PEAK+' RSI peak • '+r.VOL_CLIMAX+' volume climax • '+r.RSI_FADE+' RSI fade • '+r.FLOOR+' back to target • '+r.CAP+' max stretch');
   renderHold(); renderCompare(); renderEq(); renderPx(); renderRsi(); renderDays(); renderTrades();
   if(m.holdings_errors&&m.holdings_errors.length) $('runMsg').textContent=m.holdings_errors.join(' • ');
   $('results').scrollIntoView({behavior:'smooth',block:'start'});
@@ -286,8 +304,8 @@ function renderHold(){
 }
 const CMP=[['net_pnl','Booked profit','money',1],['return_on_peak_pct','Return on capital used','pct',1],['extra_from_rsi','Extra from riding','money',1],['entries','Entries made','int',0],
   ['skipped_rsi_high','Buys skipped (RSI high)','int',0],['closed','Trades closed','int',1],['avg_profit_per_trade','Avg profit per trade','money',1],['peak_capital','Peak capital needed','money0',-1],
-  ['open_count','Still open at end','int',-1],['unrealized','Open positions P&L','money',1],['total_pnl','Total incl. open','money',1],['max_drawdown','Worst dip in profit','dd',-1]];
-function fmtv(t,v){if(v===null||v===undefined)return '-';if(t==='money')return '<span class="'+cls(v)+'">'+signed(v)+'</span>';if(t==='money0')return inr(v,0);if(t==='dd')return Number(v)?'<span class="neg">-'+inr(v)+'</span>':'₹0.00';if(t==='pct')return pct(v);return Number(v).toLocaleString('en-IN')}
+  ['open_count','Still open at end','int',-1],['unrealized','Open positions P&L','money',1],['total_pnl','Total incl. open','money',1],['max_drawdown','Worst dip in profit','dd',-1],['max_drawdown_pct','Worst dip % of capital','pctdd',-1]];
+function fmtv(t,v){if(v===null||v===undefined)return '-';if(t==='money')return '<span class="'+cls(v)+'">'+signed(v)+'</span>';if(t==='money0')return inr(v,0);if(t==='dd')return Number(v)?'<span class="neg">-'+inr(v)+'</span>':'₹0.00';if(t==='pct')return pct(v);if(t==='pctdd')return Number(v)?'<span class="neg">-'+Number(v).toFixed(2)+'%</span>':'0%';return Number(v).toLocaleString('en-IN')}
 function renderCompare(){
   const c=RES.compare,tfs=['1m','5m','15m'],sel=RES.result.summary.timeframe;
   $('cmpTable').innerHTML='<tr><th></th>'+tfs.map(t=>'<th class="num'+(t===sel?' sel':'')+'">'+t+(t===sel?' ●':'')+'</th>').join('')+'</tr>'+
@@ -364,30 +382,41 @@ async function pollJob(id){
 }
 const VERDICT={RELIABLE:['','✓ Reliable','Also beat your current settings on unseen days'],OK:['wait','Promising','Profitable on unseen days, but not better than your current settings'],
   UNVERIFIED:['off','Not verified','Need 10+ days of data to check on unseen days'],PAST_ONLY:['bad','Past only','Did not hold up on the last 30% of days – don\'t rely on it']};
-function setupTxt(s){return s.timeframe+' • '+s.target_pct+'% • buy if RSI < '+rsiTxt(s.max_entry_rsi)+(s.hold_rsi!=null?' • ride ≥ '+s.hold_rsi+', book ≥ '+s.exit_rsi:' • no riding')}
+function dipTxt(s){const a=[];if(s.min_gap_pct)a.push('ladder '+s.min_gap_pct+'% after '+s.ladder_after);if(s.trend_days)a.push(s.trend_days+'-day trend');if(s.pause_loss_pct)a.push('pause at -'+s.pause_loss_pct+'%');if(s.vol_block_mult)a.push('volume '+s.vol_block_mult+'×');if(s.max_open)a.push('max '+s.max_open+' lots');return a.join(', ')||'none'}
+function setupTxt(s){return s.timeframe+' • '+s.target_pct+'% • buy if RSI < '+rsiTxt(s.max_entry_rsi)+(s.hold_rsi!=null?' • ride ≥ '+s.hold_rsi+', book ≥ '+s.exit_rsi:' • no riding')+(dipTxt(s)!=='none'?' • '+dipTxt(s):'')}
 function renderOpt(){
   const o=OPT,sp=o.split,top=o.top,base=o.baseline;
   $('optProgress').classList.add('hide');$('optOut').classList.remove('hide');
-  $('optMeta').textContent='('+o.tested+' setups tested • '+dfmt(o.meta.from)+' – '+dfmt(o.meta.to)+(sp.enabled?' • tuned on '+dfmt(sp.train_from)+' – '+dfmt(sp.train_to)+', checked on '+dfmt(sp.test_from)+' – '+dfmt(sp.test_to):'')+')';
+  $('optMeta').textContent='('+o.tested+' setups tested • searching for '+({balanced:'balanced',low_dip:'lower worst dip',profit:'max profit'}[o.risk])+(o.has_volume?'':' • no volume in data, volume rules skipped')+' • '+dfmt(o.meta.from)+' – '+dfmt(o.meta.to)+(sp.enabled?' • tuned on '+dfmt(sp.train_from)+' – '+dfmt(sp.train_to)+', checked on '+dfmt(sp.test_from)+' – '+dfmt(sp.test_to):'')+')';
   if(!top.length){$('optKpis').innerHTML='<div class="empty">No setup made at least '+o.min_trades+' trades. Try a longer date range or more data.</div>';$('optTable').innerHTML='';$('tfTable').innerHTML='';renderOptHold();return}
   const best=top[0],bs=best.settings,v=VERDICT[best.verdict];
   $('optKpis').innerHTML=kpi('Best setup',bs.timeframe+' • '+bs.target_pct+'% target','Buy only if RSI < '+rsiTxt(bs.max_entry_rsi)+(bs.hold_rsi!=null?' • ride at RSI ≥ '+bs.hold_rsi+', book at ≥ '+bs.exit_rsi:' • sell at target'),'',true)+
     kpi('Verdict','<span class="pill '+v[0]+'">'+v[1]+'</span>',v[2])+
     kpi('Booked profit (full period)',signed(best.full.net_pnl),'Your current settings: '+signed(base.full.net_pnl),cls(best.full.net_pnl))+
     kpi('Return on capital',pct(best.full.return_on_peak_pct),'Current: '+pct(base.full.return_on_peak_pct),cls(best.full.return_on_peak_pct))+
-    kpi('Worst dip',best.full.max_drawdown?'-'+inr(best.full.max_drawdown):'₹0','Current: '+(base.full.max_drawdown?'-'+inr(base.full.max_drawdown):'₹0'),best.full.max_drawdown?'neg':'')+
+    kpi('Worst dip',best.full.max_drawdown?'-'+inr(best.full.max_drawdown):'₹0',best.full.max_drawdown_pct+'% of capital • current '+(base.full.max_drawdown?'-'+inr(base.full.max_drawdown,0):'₹0')+' ('+base.full.max_drawdown_pct+'%)',best.full.max_drawdown?'neg':'')+
+    kpi('Dip rules',dipTxt(bs),'Ladder / trend / volume rules in this setup')+
     kpi('Stuck at a loss at end',best.full.open_count+' lots',(best.full.open_loss?'-'+inr(best.full.open_loss,0):'₹0')+' • current '+base.full.open_count+' lots');
   const row=(r,isBase)=>{const s=r.settings,vv=VERDICT[r.verdict]||['off','Your current',''];
-    return '<tr'+(isBase?' class="baseline"':'')+'><td>'+(isBase?'<b>Your current settings (no RSI)</b>':'<span class="pill '+vv[0]+'">'+vv[1]+'</span>')+'</td><td>'+s.timeframe+'</td><td class="num">'+s.target_pct+'%</td><td class="num">'+rsiTxt(s.max_entry_rsi)+'</td><td class="num">'+rsiTxt(s.hold_rsi)+'</td><td class="num">'+(s.hold_rsi!=null?s.exit_rsi:'-')+'</td>'+
+    return '<tr'+(isBase?' class="baseline"':'')+'><td>'+(isBase?'<b>Your current settings (no RSI)</b>':'<span class="pill '+vv[0]+'">'+vv[1]+'</span>')+'</td><td>'+s.timeframe+'</td><td class="num">'+s.target_pct+'%</td><td class="num">'+rsiTxt(s.max_entry_rsi)+'</td><td class="num">'+rsiTxt(s.hold_rsi)+'</td><td class="num">'+(s.hold_rsi!=null?s.exit_rsi:'-')+'</td><td style="white-space:normal;min-width:140px">'+esc(dipTxt(s))+'</td>'+
       '<td class="num '+cls(r.train.return_on_peak_pct)+'">'+pct(r.train.return_on_peak_pct)+'</td><td class="num '+(r.test?cls(r.test.return_on_peak_pct):'')+'">'+(r.test?pct(r.test.return_on_peak_pct):'-')+'</td>'+
-      '<td class="num '+cls(r.full.net_pnl)+'">'+signed(r.full.net_pnl)+'</td><td class="num">'+(r.full.max_drawdown?'<span class="neg">-'+inr(r.full.max_drawdown,0)+'</span>':'₹0')+'</td><td class="num">'+r.full.open_count+'</td><td class="num">'+r.full.closed+'</td><td class="num">'+inr(r.full.peak_capital,0)+'</td>'+
+      '<td class="num '+cls(r.full.net_pnl)+'">'+signed(r.full.net_pnl)+'</td><td class="num">'+(r.full.max_drawdown?'<span class="neg">-'+inr(r.full.max_drawdown,0)+'</span><div class="meta">'+r.full.max_drawdown_pct+'%</div>':'₹0')+'</td><td class="num">'+r.full.open_count+'</td><td class="num">'+r.full.closed+'</td><td class="num">'+inr(r.full.peak_capital,0)+'</td>'+
       '<td>'+(isBase?'':'<button class="secondary btn-sm" onclick="useSetup('+top.indexOf(r)+')">Use these</button>')+'</td></tr>'};
-  $('optTable').innerHTML='<tr><th>Verdict</th><th>Timeframe</th><th class="num">Target</th><th class="num">Buy only if RSI &lt;</th><th class="num">Ride at RSI ≥</th><th class="num">Book at RSI ≥</th><th class="num">Return (tuning days)</th><th class="num">Return (unseen days)</th><th class="num">Booked profit</th><th class="num">Worst dip</th><th class="num">Stuck lots</th><th class="num">Trades</th><th class="num">Peak capital</th><th></th></tr>'+
+  $('optTable').innerHTML='<tr><th>Verdict</th><th>Timeframe</th><th class="num">Target</th><th class="num">Buy only if RSI &lt;</th><th class="num">Ride at RSI ≥</th><th class="num">Book at RSI ≥</th><th>Dip rules</th><th class="num">Return (tuning days)</th><th class="num">Return (unseen days)</th><th class="num">Booked profit</th><th class="num">Worst dip</th><th class="num">Stuck lots</th><th class="num">Trades</th><th class="num">Peak capital</th><th></th></tr>'+
     top.map(r=>row(r,false)).join('')+row(base,true);
   $('tfTable').innerHTML='<tr><th>Timeframe</th><th>Best setup</th><th class="num">Return (tuning days)</th><th class="num">Booked profit</th><th class="num">Worst dip</th><th class="num">Trades</th></tr>'+
     ['1m','5m','15m'].map(t=>{const r=o.by_timeframe[t];if(!r)return '<tr><td>'+t+'</td><td colspan="5" class="meta">Too few trades</td></tr>';
       return '<tr><td><b>'+t+'</b></td><td>'+esc(setupTxt(r.settings))+'</td><td class="num '+cls(r.train.return_on_peak_pct)+'">'+pct(r.train.return_on_peak_pct)+'</td><td class="num '+cls(r.train.net_pnl)+'">'+signed(r.train.net_pnl)+'</td><td class="num">'+(r.train.max_drawdown?'<span class="neg">-'+inr(r.train.max_drawdown,0)+'</span>':'₹0')+'</td><td class="num">'+r.train.closed+'</td></tr>'}).join('');
+  renderDips();
   renderOptHold();
+}
+function renderDips(){
+  const d=OPT.dip_options||[];if(!d.length){$('dipTable').innerHTML='';return}
+  const best=Math.max(...d.map(r=>r.profit_per_dip||0));
+  $('dipTable').innerHTML='<tr><th>Option</th><th class="num">Booked profit</th><th class="num">Worst dip</th><th class="num">Dip % of capital</th><th class="num">Profit per ₹1 of dip</th><th class="num">Return on capital</th><th class="num">Unseen days return</th><th class="num">Peak capital</th><th class="num">Stuck lots</th><th></th></tr>'+
+    d.map((r,i)=>'<tr'+(i===0?' class="baseline"':'')+'><td style="white-space:normal;min-width:260px">'+esc(r.label)+'</td><td class="num '+cls(r.full.net_pnl)+'">'+signed(r.full.net_pnl)+'</td><td class="num">'+(r.full.max_drawdown?'<span class="neg">-'+inr(r.full.max_drawdown,0)+'</span>':'₹0')+'</td><td class="num">'+r.full.max_drawdown_pct+'%</td>'+
+      '<td class="num'+(r.profit_per_dip===best&&best>0?' best':'')+'" style="'+(r.profit_per_dip===best&&best>0?'background:rgba(57,135,229,.14);font-weight:700':'')+'">'+(r.profit_per_dip??'-')+'</td><td class="num '+cls(r.full.return_on_peak_pct)+'">'+pct(r.full.return_on_peak_pct)+'</td><td class="num '+(r.test?cls(r.test.return_on_peak_pct):'')+'">'+(r.test?pct(r.test.return_on_peak_pct):'-')+'</td>'+
+      '<td class="num">'+inr(r.full.peak_capital,0)+'</td><td class="num">'+r.full.open_count+'</td><td>'+(i===0?'':'<button class="secondary btn-sm" onclick="useDip('+i+')">Use these</button>')+'</td></tr>').join('');
 }
 function renderOptHold(){
   const h=OPT.holdings;$('optHoldWrap').classList.toggle('hide',!h);if(!h)return;
@@ -395,7 +424,11 @@ function renderOptHold(){
     h.map((r,i)=>'<tr><td class="num"><b>'+r.book_rsi+'</b></td><td class="num">'+r.parts+'</td><td class="num">'+r.sold_qty+'</td><td class="num">'+r.remaining+'</td><td class="num '+cls(r.booked_profit)+'">'+signed(r.booked_profit)+'</td><td class="num">'+inr(r.end_value,0)+'</td><td class="num '+cls(r.vs_just_holding)+'">'+signed(r.vs_just_holding)+'</td><td><button class="secondary btn-sm" onclick="useHold('+i+')">Use these</button></td></tr>').join('');
   const b=h[0];$('optHoldNote').textContent=b.vs_just_holding<0?'In this period the price mostly kept rising, so selling later (higher RSI, more parts) left more money. Booking at high RSI protects you when the price turns down.':'Booking at high RSI beat simply holding in this period.';
 }
-function useSetup(i){const s=OPT.top[i].settings;$('tf').value=s.timeframe;$('target').value=s.target_pct;$('maxRsi').value=s.max_entry_rsi??'';$('holdRsi').value=s.hold_rsi??'';if(s.exit_rsi!=null)$('exitRsi').value=s.exit_rsi;updateHints();runAnalysis()}
+function applySettings(s){$('tf').value=s.timeframe;$('target').value=s.target_pct;$('maxRsi').value=s.max_entry_rsi??'';$('holdRsi').value=s.hold_rsi??'';if(s.exit_rsi!=null)$('exitRsi').value=s.exit_rsi;
+  $('gap').value=s.min_gap_pct||'';if(s.ladder_after)$('ladderAfter').value=s.ladder_after;$('trendDays').value=String(s.trend_days||0);$('pauseLoss').value=s.pause_loss_pct||'';$('volBlock').value=s.vol_block_mult||'';
+  if(s.max_open)$('maxOpen').value=s.max_open;updateHints();runAnalysis()}
+function useSetup(i){applySettings(OPT.top[i].settings)}
+function useDip(i){applySettings(OPT.dip_options[i].settings)}
 function useHold(i){const r=OPT.holdings[i];$('bookRsi').value=r.book_rsi;$('bookParts').value=r.parts;updateHints();runAnalysis()}
 
 // ---------- RSI now ----------
@@ -413,6 +446,7 @@ function renderNow(){
   $('nowTrend').textContent=(n.trend==='rising'?'▲ rising':n.trend==='falling'?'▼ falling':'■ flat')+' (was '+n.rsi_prev+')';
   $('nowNeedle').style.left=Math.max(0,Math.min(100,n.rsi))+'%';
   $('nowEntry').innerHTML='<span class="pill '+(n.entry.state==='OK'?'':'bad')+'">'+(n.entry.state==='OK'?'Allowed':'Blocked')+'</span> <span class="meta">'+esc(n.entry.msg)+'</span>';
+  $('nowExtra').textContent=[n.volume_ratio!=null?'Last candle volume '+n.volume_ratio+'× its 20-minute average':'No volume in data',n.trend_ref?n.trend_days+'-day average ₹'+px(n.trend_ref)+(n.price>=n.trend_ref?' (price above)':' (price below)'):''].filter(Boolean).join(' • ');
   $('nowSource').innerHTML='Source: '+esc(n.source)+(n.source.startsWith('live')?' • refreshes every minute':'')+(n.live_note?'<div class="err">'+esc(n.live_note)+'</div>':'');
   $('nowHoldWrap').classList.toggle('hide',!n.holdings.length);
   $('nowHold').innerHTML='<tr><th class="num">Shares</th><th class="num">Bought at</th><th class="num">Part</th><th class="num">Sell at RSI ≥</th><th class="num">Min price</th><th>Action</th><th>Why</th><th class="num">Profit if sold now</th></tr>'+

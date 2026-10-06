@@ -54,6 +54,12 @@ def _params(body, sym):
         "hold_rsi": _opt_float(body.get("hold_rsi")),
         "exit_rsi": _opt_float(body.get("exit_rsi")),
         "max_stretch": float(body.get("max_stretch") or 0),
+        "min_gap_pct": float(body.get("min_gap_pct") or 0),
+        "trend_days": int(float(body.get("trend_days") or 0)),
+        "pause_loss_pct": float(body.get("pause_loss_pct") or 0),
+        "vol_block_mult": float(body.get("vol_block_mult") or 0),
+        "vol_climax_mult": float(body.get("vol_climax_mult") or 0),
+        "risk": body.get("risk") if body.get("risk") in rb.RISK_WEIGHTS else "balanced",
     }
     if p["target_pct"] <= 0 or p["shares"] <= 0 or p["max_open"] <= 0 or p["timeframe"] not in rb.TIMEFRAMES:
         raise ValueError("Target %, shares and max open entries must be above zero")
@@ -61,6 +67,10 @@ def _params(body, sym):
         raise ValueError("RSI period must be between 2 and 50")
     if p["hold_rsi"] is not None and p["exit_rsi"] is not None and p["exit_rsi"] <= p["hold_rsi"]:
         raise ValueError("Exit RSI must be higher than Hold RSI")
+    if p["min_gap_pct"] < 0 or p["pause_loss_pct"] < 0 or p["vol_block_mult"] < 0 or p["vol_climax_mult"] < 0:
+        raise ValueError("Risk and volume settings cannot be negative")
+    if p["trend_days"] < 0 or p["trend_days"] > 30:
+        raise ValueError("Trend filter days must be between 0 and 30")
     return p
 
 
@@ -132,7 +142,7 @@ def _job_worker(job_id, data, d_from, params, holdings):
         prep = rb.Prepared(data, d_from, period=params["rsi_period"])
         if prep.start >= prep.n:
             raise ValueError("Not enough candles to warm up RSI")
-        result = rb.optimize(prep, params, progress=progress)
+        result = rb.optimize(prep, params, progress=progress, risk=params["risk"])
         if holdings:
             job["message"] = "Finding the best RSI level to sell your shares"
             result["holdings"] = rb.optimize_holdings(prep, holdings, params)[:6]
@@ -189,7 +199,7 @@ def api_now():
         return _err(str(exc))
     now = datetime.now(IST)
     stored = db.rows("SELECT ts, open, high, low, close, volume FROM candles WHERE instrumentId=? "
-                     "ORDER BY ts DESC LIMIT 1500", (sym["instrumentId"],))[::-1]
+                     "ORDER BY ts DESC LIMIT 4000", (sym["instrumentId"],))[::-1]
     source = "stored data (last download)"
     live_note = None
     if cal.is_trading_day(now) and now.time() >= cal.parse_hhmm("09:16"):

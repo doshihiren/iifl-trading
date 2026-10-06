@@ -222,6 +222,72 @@ class TestOptimizer(unittest.TestCase):
         self.assertGreaterEqual(res[0]["end_value"], res[-1]["end_value"])
 
 
+class TestDipRules(unittest.TestCase):
+    def falling(self, n=200, start=1000.0, step=0.4):
+        return [bar(minute_ts("2026-06-01" if k < 375 else "2026-06-02", k % 375), start - k * step, start - k * step,
+                    start - k * step, start - k * step) for k in range(n)]
+
+    def test_ladder_spreads_entries_down_a_fall(self):
+        cs = self.falling(200)
+        prep = rb.Prepared(cs, warmup=0)
+        plain = rb.simulate(prep, dict(BASE, max_open=50), "1m", detail=True)
+        lad = rb.simulate(prep, dict(BASE, max_open=50, min_gap_pct=2, ladder_after=5), "1m", detail=True)
+        self.assertEqual(plain["summary"]["entries"], 50)
+        self.assertLess(lad["summary"]["entries"], 15)
+        self.assertGreater(lad["summary"]["skipped_gap"], 0)
+        entries = sorted((t["entry"] for t in lad["trades"]), reverse=True)
+        for a, b in zip(entries[5:], entries[6:]):            # after the free lots: >= 2% apart
+            self.assertLessEqual(b, a * 0.98 + 1e-9)
+        self.assertLess(lad["summary"]["max_drawdown"], plain["summary"]["max_drawdown"])
+
+    def test_trend_filter_uses_previous_days_only(self):
+        days = ["2026-06-0%d" % d for d in (1, 2, 3, 4)]
+        cs = []
+        for di, d in enumerate(days):
+            px = 100 - di * 5                                   # each day lower
+            cs += [bar(minute_ts(d, k), px, px, px, px) for k in range(30)]
+        prep = rb.Prepared(cs, warmup=0)
+        ref = prep.trend_ref(2)
+        self.assertIsNone(ref[0])
+        i = next(j for j, x in enumerate(prep.ts) if x.startswith(days[2]))
+        self.assertAlmostEqual(ref[i], (100 + 95) / 2)          # days 1-2 only, not day 3 itself
+        s = rb.simulate(prep, dict(BASE, max_open=100, trend_days=2), "1m", detail=False)["summary"]
+        self.assertGreater(s["skipped_trend"], 0)
+
+    def test_volume_block_and_climax(self):
+        cs = synth(3, 8)
+        for k in cs:
+            k["volume"] = 1000
+        prep0 = rb.Prepared(cs)
+        i = next(j for j in range(prep0.start + 30, prep0.n) if prep0.minute[j] % 15 == 0)
+        cs[i - 1]["volume"] = 10000
+        cs[i - 1]["close"] = cs[i - 1]["open"] * 0.99           # red spike right before a slot
+        cs[i - 1]["low"] = min(cs[i - 1]["low"], cs[i - 1]["close"])
+        prep = rb.Prepared(cs)
+        self.assertTrue(prep.has_volume)
+        s = rb.simulate(prep, dict(BASE, max_open=500, vol_block_mult=3), "15m", detail=False)["summary"]
+        self.assertGreaterEqual(s["skipped_volume"], 1)
+        no_vol = [dict(k, volume=0) for k in cs]
+        s2 = rb.simulate(rb.Prepared(no_vol), dict(BASE, max_open=500, vol_block_mult=3), "15m", detail=False)["summary"]
+        self.assertEqual(s2["skipped_volume"], 0)               # rule switches itself off without volume
+
+    def test_risk_preference_changes_score(self):
+        s = {"peak_capital": 100000, "closed": 50, "trading_days": 10, "net_pnl": 20000, "max_drawdown": 10000, "open_loss": 0}
+        self.assertGreater(rb.score(s, "profit"), rb.score(s, "balanced"))
+        self.assertGreater(rb.score(s, "balanced"), rb.score(s, "low_dip"))
+
+    def test_optimizer_returns_dip_options(self):
+        cs = synth(12, 4)
+        for k in cs:
+            k["volume"] = 1000
+        res = rb.optimize(rb.Prepared(cs), dict(BASE, max_stretch=3, timeframe="15m"), risk="low_dip")
+        self.assertEqual(res["risk"], "low_dip")
+        self.assertTrue(res["dip_options"])
+        self.assertEqual(res["dip_options"][0]["label"], "Your chosen setup")
+        halves = [d for d in res["dip_options"] if d["settings"].get("max_open") == 15]
+        self.assertTrue(halves)
+
+
 class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -244,7 +310,8 @@ class TestApi(unittest.TestCase):
         b = {"instrumentId": "999", "timeframe": "15m", "from": self.cs[0]["ts"][:10], "to": self.cs[-1]["ts"][:10],
              "target_pct": 1, "shares": 10, "max_open": 20, "charges_pct": 0.1, "max_entry_rsi": 70, "hold_rsi": 60,
              "exit_rsi": 78, "max_stretch": 3, "holdings": "50 @ " + str(self.cs[400]["close"]), "book_rsi": 70,
-             "book_parts": 2, "book_step": 5, "min_profit_pct": 0.5}
+             "book_parts": 2, "book_step": 5, "min_profit_pct": 0.5, "min_gap_pct": 0.5, "ladder_after": 5,
+             "trend_days": 3, "pause_loss_pct": 5, "vol_block_mult": 2, "vol_climax_mult": 3, "risk": "low_dip"}
         b.update(kw)
         return b
 
