@@ -26,7 +26,7 @@ import json
 import logging
 import math
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_CEILING, Decimal
 from zoneinfo import ZoneInfo
 
@@ -483,7 +483,8 @@ class Engine:
         return float(held) + float(pending)
 
     def _insert_order(self, c, *, order_key, bot, side, qty, ref, signal_key, lot_id, state):
-        ts = db.now_utc()
+        # Use the engine clock so order ages are measured on one clock (same as real time in production).
+        ts = self.now().astimezone(timezone.utc).isoformat()
         tag = order_tag(order_key) if (bot["mode"] == "LIVE" and config.SEND_ORDER_TAG) else None
         cur = c.execute(
             """INSERT INTO orders(order_key, bot_id, signal_key, lot_id, side, mode, symbol, instrumentId,
