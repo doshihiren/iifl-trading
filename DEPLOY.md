@@ -120,6 +120,14 @@ Dashboard → **🔬 Analysis**.
 
 Check what IIFL returns for candles: `python tools.py candles-check SBC`
 
+## Strategy Lab (compare strategies A–D)
+
+Dashboard → **🧪 Strategy Lab** (uses the candles downloaded on the Analysis page; the Analysis and RSI Analysis pages are unchanged).
+- **A Core ladder** (DELIVERY): buy only after the price falls X% below the last open buy, own target per lot, optional core shares never sold.
+- **B RSI bounce**, **C Volume breakout**, **D Scalp** (INTRADAY, squared off 15:10) with stop losses, risk-based sizing and a daily loss limit.
+- Pick a **tune** period and a **check** period (auto split ⅔ / ⅓). The optimiser ranks settings on the tune period and shows how each did on the check period.
+- Charges: approximate NSE statutory charges + your brokerage per order (or a custom %).
+
 ## Reports
 
 Dashboard → **Reports** (or `/iifl/reports`): date range presets, LIVE/PAPER filter, script, bot, and grouping by day, week, month, script, bot, mode, timeframe, product or exit reason. Daily and cumulative P&L charts, LIVE vs PAPER comparison, open positions with unrealized P&L, and CSV download.

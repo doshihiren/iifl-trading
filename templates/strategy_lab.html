@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Strategy Lab</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#121a2e;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--grid:#1d2842;--blue:#6ea8fe;
+      --sA:#3987e5;--sB:#d95926;--sC:#199e70;--sD:#c98500;--good:#32d583;--bad:#ff6b6b}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#08101f,#0f1730);font-family:Inter,system-ui,Arial,sans-serif;color:var(--text)}
+    .wrap{max-width:1440px;margin:auto;padding:24px 18px 60px}
+    .top{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap}
+    h1{font-size:26px;margin:0 0 4px}.sub{color:var(--muted);margin:0;font-size:14px}
+    .nav{display:flex;gap:14px;flex-wrap:wrap}.nav a{color:var(--blue);text-decoration:none;font-weight:700;font-size:14px}
+    .card{background:rgba(18,26,46,.95);border:1px solid var(--line);border-radius:18px;padding:18px 20px;margin-bottom:16px}
+    h2{font-size:17px;margin:0 0 14px}h3{font-size:15px;margin:0}
+    .step{display:inline-block;background:#24365e;color:#cfe0ff;border-radius:999px;width:24px;height:24px;text-align:center;line-height:24px;font-size:13px;margin-right:8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end}
+    .f{display:flex;flex-direction:column;gap:6px;min-width:0}.f label{font-size:11px;color:var(--muted)}
+    .hint{font-size:11px;color:#b9d2ff;min-height:14px}
+    input,select{width:100%;background:#0d1528;color:var(--text);border:1px solid #30405f;border-radius:10px;padding:9px 11px;font-size:13px;outline:none;color-scheme:dark}
+    input[type=checkbox]{width:auto;accent-color:#6ea8fe}
+    input:focus,select:focus{border-color:var(--blue)}
+    button{border:0;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer;font-size:13px}
+    .go{background:var(--good);color:#052718}.secondary{background:#202d49;color:var(--text)}.ghost{background:transparent;color:var(--blue);padding:6px 4px}
+    .btn-sm{padding:6px 10px;font-size:12px;border-radius:8px}
+    details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:12px}
+    .strats{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px}
+    .sc{background:#0d1528;border:1px solid var(--line);border-radius:14px;padding:14px;border-top:4px solid var(--c)}
+    .sc .head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+    .sc .desc{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px;min-height:54px}
+    .sc .grid{grid-template-columns:1fr 1fr;gap:10px}
+    .tag{font-size:10px;font-weight:800;padding:3px 7px;border-radius:999px;background:#202d49;color:#c9d6f2}
+    .chk{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;cursor:pointer}
+    table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+    th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+    th{color:var(--muted);font-weight:600;position:sticky;top:0;background:#121a2e}
+    td.num,th.num{text-align:right}.scroll{overflow:auto;max-height:520px}
+    .meta{color:var(--muted);font-size:12px}.pos{color:var(--good)}.neg{color:var(--bad)}.err{color:#ff9da4}.warn{color:#ffd98a}
+    .cmp td.best{background:rgba(50,213,131,.12);font-weight:700}
+    .cmp th.grp{text-align:center;border-bottom:2px solid var(--c)}
+    .cmp td.chk-col{background:rgba(110,168,254,.05)}
+    .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:6px}
+    .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+    .kv div{background:#0d1528;border:1px solid var(--line);border-radius:12px;padding:11px}.kv b{display:block;font-size:18px}.kv span{color:var(--muted);font-size:11px}
+    .chart{position:relative;width:100%}.chart svg{display:block;width:100%}
+    .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:-4px 0 8px}.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+    .tip{position:absolute;pointer-events:none;background:#0a1122;border:1px solid #33456b;border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.6;opacity:0;white-space:nowrap;z-index:5}
+    .seg{display:inline-flex;border:1px solid #30405f;border-radius:10px;overflow:hidden}.seg button{background:transparent;color:var(--muted);border-radius:0;padding:7px 12px;font-weight:600}.seg button.on{background:#24365e;color:#fff}
+    .verdict{font-size:14px;line-height:1.6;background:#0c1426;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+    .chips{display:flex;flex-wrap:wrap;gap:8px}.chip{background:#0d1528;border:1px solid var(--line);border-radius:999px;padding:6px 11px;font-size:12px}
+    .bar{height:8px;background:#0d1528;border-radius:99px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:var(--blue);width:0}
+    .note{font-size:12px;color:#aeb9d1;background:#0c1426;border:1px solid var(--line);padding:11px 13px;border-radius:10px;line-height:1.6}
+    .empty{color:var(--muted);text-align:center;padding:22px}
+    #results,#optBox{display:none}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>🧪 Strategy Lab</h1><p class="sub">Compare 4 strategies on your stock • tune on one period, check on another you didn't tune on</p></div>
+    <div class="nav"><a href="/iifl/analysis">🔬 Analysis</a><a href="/iifl/analysis-rsi">📈 RSI Analysis</a><a href="/iifl/reports">📊 Reports</a><a href="/iifl/">← Dashboard</a></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">1</span>Setup</h2>
+    <div class="grid">
+      <div class="f"><label>Script (data from the Analysis page)</label><select id="sym"></select><div class="hint" id="symHint"></div></div>
+      <div class="f"><label>Timeframe for signals</label><select id="tf"><option>1m</option><option selected>5m</option><option>15m</option></select><div class="hint">Stops &amp; targets always checked every minute</div></div>
+      <div class="f"><label>Tune from</label><input type="date" id="trFrom"><div class="hint"></div></div>
+      <div class="f"><label>Tune to</label><input type="date" id="trTo"><div class="hint"></div></div>
+      <div class="f"><label>Check from</label><input type="date" id="teFrom"><div class="hint"></div></div>
+      <div class="f"><label>Check to</label><input type="date" id="teTo"><div class="hint"><button class="ghost" style="font-size:11px;padding:0" onclick="autoSplit()">Auto split ⅔ tune • ⅓ check</button></div></div>
+    </div>
+    <div class="grid" style="margin-top:12px">
+      <div class="f"><label>Core bucket ₹ (strategy A)</label><input type="number" id="coreCap" value="500000" step="10000"><div class="hint">Long-term, DELIVERY</div></div>
+      <div class="f"><label>Active bucket ₹ (B, C, D)</label><input type="number" id="actCap" value="500000" step="10000"><div class="hint">INTRADAY, squared off 15:10</div></div>
+      <div class="f"><label>Daily loss limit ₹</label><input type="number" id="dayLimit" value="5000" step="500"><div class="hint">Stop for the day when hit (0 = off)</div></div>
+      <div class="f"><label>Risk per trade ₹</label><input type="number" id="risk" value="2500" step="250"><div class="hint">Used when sizing = "by risk"</div></div>
+      <div class="f"><label>Brokerage ₹ per order</label><input type="number" id="brok" value="20" step="1"><div class="hint">Check IIFL's plan</div></div>
+      <div class="f"><label>Charges</label><select id="chMode"><option value="auto" selected>Auto (NSE STT, stamp, fees, GST)</option><option value="custom">Custom % per side</option></select><div class="hint"><input type="number" id="chPct" value="0.1" step="0.01" style="display:none;padding:5px 8px" title="% per side"></div></div>
+    </div>
+    <details><summary>Advanced (indicator settings, timings)</summary>
+      <div class="grid" style="margin-top:10px">
+        <div class="f"><label>RSI period</label><input type="number" id="rsiP" value="14"></div>
+        <div class="f"><label>Volume average (bars)</label><input type="number" id="volLb" value="20"></div>
+        <div class="f"><label>Opening range (minutes)</label><input type="number" id="orbMin" value="15"></div>
+        <div class="f"><label>No new intraday entries after</label><input type="time" id="lastEntry" value="15:00"></div>
+        <div class="f"><label>Intraday square-off at</label><input type="time" id="sqOff" value="15:10"></div>
+      </div>
+    </details>
+  </div>
+
+  <div class="card" id="checkCard">
+    <h2><span class="step">2</span>Stock check <span class="meta">(whole selected period)</span></h2>
+    <div class="kv" id="liq"><div><span>Pick a script</span></div></div>
+    <div class="hint" id="liqWarn" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">3</span>Strategies <span class="meta">• tick the ones to compare</span></h2>
+    <div class="strats" id="strats"></div>
+    <div style="display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap">
+      <button class="go" onclick="compare()">Compare ticked strategies</button>
+      <span class="hint err" id="runMsg"></span>
+    </div>
+  </div>
+
+  <div class="card" id="optBox">
+    <h2 id="optTitle">Optimiser</h2>
+    <div class="meta" id="optMsg"></div>
+    <div class="bar"><i id="optBar"></i></div>
+    <div class="scroll"><table id="optTable"></table></div>
+    <div class="note" style="margin-top:10px">Settings are ranked on the <b>tune</b> period only. Trust a setting when it also does well on the <b>check</b> period, which it never saw. A setting that is great on tune and poor on check is luck.</div>
+  </div>
+
+  <div id="results">
+    <div class="card">
+      <h2 id="resTitle">Results</h2>
+      <div class="verdict" id="verdict"></div>
+      <div style="overflow-x:auto"><table class="cmp" id="cmpTable"></table></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+        <h2 style="margin:0">Profit over time <span class="meta">(incl. open positions, after charges)</span></h2>
+        <div class="seg" id="eqSeg"><button data-p="train">Tune period</button><button data-p="test" class="on">Check period</button></div>
+      </div>
+      <div class="legend" id="eqLegend"></div>
+      <div class="chart" id="eqChart"></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+        <h2 style="margin:0">Details</h2>
+        <div style="display:flex;gap:10px"><select id="detS" style="width:auto"></select><select id="detP" style="width:auto"><option value="test">Check period</option><option value="train">Tune period</option></select></div>
+      </div>
+      <div class="chips" id="exitChips"></div>
+      <h3 style="margin:16px 0 8px">Day by day</h3>
+      <div class="scroll" style="max-height:320px"><table id="dayTable"></table></div>
+      <h3 style="margin:16px 0 8px">Trades <span class="meta" id="tradeMeta"></span></h3>
+      <div class="scroll"><table id="tradeTable"></table></div>
+    </div>
+
+    <div class="note">
+      <b>How the Lab tests.</b> Signals are decided when a candle of the chosen timeframe closes and filled at the next minute's open. Stops and targets are checked every minute. A price gap fills at the open, and if one minute touches both stop and target it assumes the stop came first.
+      Charges use approximate NSE rates (delivery STT 0.1% each side; intraday STT 0.025% on sell; stamp duty, exchange and SEBI fees, 18% GST) plus your brokerage. Check them against your contract note.
+      Real fills can be worse, especially with big orders, so keep each order under the "safe order size" above. Past results don't guarantee future results, and this is not investment advice.
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const COLORS={A:'var(--sA)',B:'var(--sB)',C:'var(--sC)',D:'var(--sD)'};
+let SYMS=[], RES=null, eqPeriod='test', jobTimer=null;
+function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function inr(v,d=2){if(v===null||v===undefined||v==='')return '-';const n=Number(v);return (n<0?'-':'')+'₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d})}
+function signed(v,d=2){if(v===null||v===undefined)return '-';const n=Number(v);return (n>0?'+':'')+inr(n,d)}
+function cls(v){v=Number(v);return v>0?'pos':(v<0?'neg':'')}
+function px(v){return v===null||v===undefined?'-':Number(v).toFixed(2)}
+function hrs(h){if(h===null||h===undefined)return '-';h=Number(h);if(h<1)return Math.round(h*60)+' min';if(h<48)return h.toFixed(1)+' h';return (h/24).toFixed(1)+' days'}
+function dfmt(s){if(!s)return '-';return new Date(s.slice(0,10)+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}
+async function readJson(r){const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error('Server error (HTTP '+r.status+'). The request timed out or the web service is restarting – try again in a minute.')}}
+async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){location.href='/iifl/auth/login';throw new Error('login')}const d=await readJson(r);if(!r.ok)throw new Error(d.message||'Request failed');return d.result}
+const post=(url,body)=>api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+
+// ---------- strategy cards ----------
+const SIZING=(s,def)=>({k:'sizing',l:'Order size',t:'select',o:[['risk','By risk (₹ per trade ÷ stop)'],['shares','Fixed shares']],v:def});
+const STRATS={
+  A:{name:'Core ladder',tag:'DELIVERY • Core bucket',on:true,desc:'Buys only when price is <b>X% below the last open buy</b> (optional RSI filter). Each lot sells at its own target. Optional core quantity is bought once and never sold. No stop loss.',
+     f:[{k:'spacing_pct',l:'Buy again after drop %',v:1,s:0.1},{k:'target_pct',l:'Target % per lot',v:2,s:0.1},{k:'rsi_max',l:'Only buy if RSI ≤ (blank = off)',v:'',s:1},{k:'shares',l:'Shares per buy',v:100,s:1},{k:'max_positions',l:'Max open lots',v:20,s:1},{k:'core_qty',l:'Core shares (never sold)',v:0,s:1}]},
+  B:{name:'RSI bounce',tag:'INTRADAY • Active bucket',on:true,desc:'Buys when RSI <b>crosses up</b> through a level (optionally only above VWAP). Sells at target, stop, when RSI reaches the exit level, or at 15:10.',
+     f:[{k:'rsi_buy',l:'Buy when RSI crosses up',v:30,s:1},{k:'rsi_exit',l:'Sell when RSI ≥ (blank = off)',v:70,s:1},{k:'target_pct',l:'Target %',v:0.8,s:0.05},{k:'sl_pct',l:'Stop loss %',v:0.7,s:0.05},{k:'vwap_filter',l:'Only when price ≥ VWAP',t:'check',v:true},SIZING('B','risk'),{k:'shares',l:'Shares (if fixed)',v:100,s:1}]},
+  C:{name:'Volume breakout',tag:'INTRADAY • Active bucket',on:true,desc:'After the opening range, buys when a candle <b>closes above the range high on N× average volume</b>. Stop at range low (or %), target = R × risk, optional trailing stop.',
+     f:[{k:'vol_mult',l:'Volume ≥ N × average',v:2,s:0.1},{k:'r_multiple',l:'Target = R × risk',v:2,s:0.1},{k:'sl_mode',l:'Stop at',t:'select',o:[['orb','Opening-range low'],['pct','Fixed %']],v:'orb'},{k:'sl_pct',l:'Stop % (if fixed)',v:1,s:0.05},{k:'trail_pct',l:'Trailing stop % (0 = off)',v:0,s:0.05},{k:'max_trades_day',l:'Max trades per day',v:1,s:1},SIZING('C','risk'),{k:'shares',l:'Shares (if fixed)',v:100,s:1}]},
+  D:{name:'Scalp',tag:'INTRADAY • Active bucket',on:false,desc:'Buys on <b>every candle</b> up to the max positions, small target and stop, 15:10 exit. Shows how much charges take from very frequent trading.',
+     f:[{k:'target_pct',l:'Target %',v:0.3,s:0.05},{k:'sl_pct',l:'Stop loss %',v:0.3,s:0.05},{k:'max_positions',l:'Max positions',v:1,s:1},SIZING('D','shares'),{k:'shares',l:'Shares (if fixed)',v:100,s:1}]},
+};
+function fieldHtml(s,f){
+  const id='p_'+s+'_'+f.k;
+  if(f.t==='check') return '<div class="f"><label>&nbsp;</label><label class="chk" style="font-weight:600;font-size:12px"><input type="checkbox" id="'+id+'"'+(f.v?' checked':'')+'>'+f.l+'</label></div>';
+  if(f.t==='select') return '<div class="f"><label>'+f.l+'</label><select id="'+id+'">'+f.o.map(o=>'<option value="'+o[0]+'"'+(o[0]===f.v?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></div>';
+  return '<div class="f"><label>'+f.l+'</label><input type="number" id="'+id+'" value="'+f.v+'" step="'+(f.s||1)+'"></div>';
+}
+$('strats').innerHTML=Object.entries(STRATS).map(([s,d])=>
+  '<div class="sc" style="--c:'+COLORS[s]+'"><div class="head"><label class="chk"><input type="checkbox" id="en_'+s+'"'+(d.on?' checked':'')+'>'+s+' · '+d.name+'</label><span class="tag">'+d.tag+'</span></div>'+
+  '<div class="desc">'+d.desc+'</div><div class="grid">'+d.f.map(f=>fieldHtml(s,f)).join('')+'</div>'+
+  '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px"><span class="hint" id="sizeHint_'+s+'"></span><button class="secondary btn-sm" onclick="optimise(\''+s+'\')">⚙ Optimise on tune period</button></div></div>').join('');
+function stratValues(s){const o={enabled:$('en_'+s).checked};STRATS[s].f.forEach(f=>{const el=$('p_'+s+'_'+f.k);o[f.k]=f.t==='check'?el.checked:el.value});o.risk_per_trade=$('risk').value;return o}
+function setStratValues(s,params){Object.entries(params).forEach(([k,v])=>{const el=$('p_'+s+'_'+k);if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=(v===null?'':v)})}
+
+$('chMode').addEventListener('change',()=>{$('chPct').style.display=$('chMode').value==='custom'?'block':'none'});
+
+function body(){
+  const st={};Object.keys(STRATS).forEach(s=>st[s]=stratValues(s));
+  return {instrumentId:$('sym').value,timeframe:$('tf').value,train_from:$('trFrom').value,train_to:$('trTo').value,test_from:$('teFrom').value,test_to:$('teTo').value,
+    global:{core_capital:$('coreCap').value,active_capital:$('actCap').value,daily_loss_limit:$('dayLimit').value,brokerage:$('brok').value,
+      charges_mode:$('chMode').value,charges_pct:$('chPct').value,rsi_period:$('rsiP').value,vol_lookback:$('volLb').value,orb_minutes:$('orbMin').value,
+      last_entry_time:$('lastEntry').value,square_off_time:$('sqOff').value},strategies:st};
+}
+
+// ---------- setup ----------
+async function loadSyms(){
+  try{SYMS=await api('/iifl/api/lab/symbols')}catch(e){$('symHint').textContent=e.message;return}
+  $('sym').innerHTML=SYMS.length?SYMS.map(s=>'<option value="'+esc(s.instrumentId)+'">'+esc(s.symbol)+'</option>').join(''):'<option value="">No data yet – fetch it on the Analysis page</option>';
+  onSym();
+}
+function cur(){return SYMS.find(s=>s.instrumentId===$('sym').value)}
+function onSym(){const s=cur();if(!s){$('symHint').textContent='';return}
+  $('symHint').textContent=s.days+' days • '+dfmt(s.first)+' – '+dfmt(s.last);
+  ['trFrom','trTo','teFrom','teTo'].forEach(i=>{$(i).min=s.first.slice(0,10);$(i).max=s.last.slice(0,10)});
+  autoSplit();}
+function autoSplit(){const s=cur();if(!s)return;
+  const a=new Date(s.first.slice(0,10)+'T00:00:00'),b=new Date(s.last.slice(0,10)+'T00:00:00');
+  const cut=new Date(a.getTime()+(b-a)*2/3);const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const next=new Date(cut.getTime()+86400000);
+  $('trFrom').value=iso(a);$('trTo').value=iso(cut);$('teFrom').value=iso(next);$('teTo').value=iso(b);checkStock();}
+$('sym').addEventListener('change',onSym);
+['trFrom','teTo'].forEach(i=>$(i).addEventListener('change',checkStock));
+
+let LIQ=null;
+async function checkStock(){
+  const s=cur();if(!s)return;
+  try{LIQ=await post('/iifl/api/lab/check',{instrumentId:s.instrumentId,from:$('trFrom').value,to:$('teTo').value})}catch(e){$('liq').innerHTML='<div><span class="err">'+esc(e.message)+'</span></div>';return}
+  const L=LIQ;
+  $('liq').innerHTML=
+    '<div><b>₹'+px(L.price)+'</b><span>Last price</span></div>'+
+    '<div><b>'+Number(L.avg_daily_volume).toLocaleString('en-IN')+'</b><span>Avg shares traded per day</span></div>'+
+    '<div><b>'+Number(L.median_1m_volume).toLocaleString('en-IN')+'</b><span>Typical shares per minute</span></div>'+
+    '<div><b>'+L.avg_day_range_pct+'%</b><span>Avg high–low range per day</span></div>'+
+    '<div><b>'+Number(L.safe_order_qty).toLocaleString('en-IN')+' sh</b><span>Safe order size (≈10% of a minute)</span></div>';
+  updateWarn();
+}
+function updateWarn(){
+  const L=LIQ;if(!L)return;const w=[];
+  if(!L.has_volume) w.push('⚠ No volume data in the candles – the volume-breakout filter is skipped and VWAP uses average price.');
+  ['A','B','C','D'].forEach(s=>{const sh=Number($('p_'+s+'_shares').value);const sz=$('p_'+s+'_sizing');const fixed=!sz||sz.value==='shares';
+    $('sizeHint_'+s).textContent=fixed&&L.price?('One order ≈ '+inr(sh*L.price,0)):'';
+    if(fixed&&L.safe_order_qty&&sh>L.safe_order_qty) w.push('⚠ '+s+': '+sh+' shares per order is above the safe size ('+L.safe_order_qty+'); real fills would be worse than tested.')});
+  if(L.median_1m_volume<200) w.push('⚠ Thin stock: very few shares trade per minute, so 1-minute strategies are hard to fill at these prices.');
+  $('liqWarn').innerHTML=w.map(x=>'<div class="warn">'+esc(x)+'</div>').join('');
+}
+document.addEventListener('input',e=>{if(e.target.id&&e.target.id.startsWith('p_'))updateWarn()});
+
+// ---------- compare ----------
+async function compare(){
+  $('runMsg').textContent='Running…';
+  try{RES=await post('/iifl/api/lab/run',body());$('runMsg').textContent='';render()}
+  catch(e){$('runMsg').textContent=e.message}
+}
+const ROWS=[['total','Total P&L (incl. open, after charges)','money',1],['return_pct','Return on bucket','pct',1],['net_closed','Booked P&L (closed trades)','money',1],['charges','Charges paid','money0',-1],
+  ['trades','Closed trades','int',0],['win_rate','Win rate','pct0',1],['profit_factor','Profit factor (wins ÷ losses)','num',1],['expectancy','Avg P&L per trade','money',1],
+  ['max_dd','Worst drawdown','dd',-1],['max_dd_pct','Worst drawdown % of bucket','ddp',-1],['longest_dd_days','Longest time below a high (days)','int',-1],
+  ['green_days','Green days','int',1],['red_days','Red days','int',-1],['best_day','Best day','money',1],['worst_day','Worst day','money',1],['limit_days','Days loss limit hit','int',-1],
+  ['open_count','Open at end','int',0],['open_pnl','Open positions P&L','money',1],['core_pnl','Core shares P&L','money',1],['peak_capital','Peak capital used','money0',0],['avg_capital','Avg capital used','money0',0],['avg_hold_h','Avg holding time','hrs',0]];
+function fmt(t,v){if(v===null||v===undefined)return '-';
+  if(t==='money')return '<span class="'+cls(v)+'">'+signed(v)+'</span>';if(t==='money0')return inr(v,0);
+  if(t==='pct')return '<span class="'+cls(v)+'">'+(v>0?'+':'')+v+'%</span>';if(t==='pct0')return v+'%';
+  if(t==='dd')return v?'<span class="neg">-'+inr(v,0)+'</span>':'₹0';if(t==='ddp')return v?'<span class="neg">-'+v+'%</span>':'0%';
+  if(t==='hrs')return hrs(v);if(t==='num')return v>=99?'∞':v;return Number(v).toLocaleString('en-IN')}
+function render(){
+  $('results').style.display='block';
+  const S=Object.keys(RES.strategies), R=RES.strategies;
+  const any=R[S[0]], tr=any.train.summary, te=any.test?any.test.summary:null;
+  $('resTitle').innerHTML=esc(RES.symbol)+' • '+esc(RES.timeframe)+' signals <span class="meta">• tune '+dfmt(tr.from)+' – '+dfmt(tr.to)+(te?' • check '+dfmt(te.from)+' – '+dfmt(te.to):'')+'</span>';
+  // verdict
+  const per=te?'test':'train';
+  const ranked=S.map(s=>({s,sm:R[s][per].summary})).sort((a,b)=>b.sm.total-a.sm.total);
+  const top=ranked[0];
+  const both=S.filter(s=>R[s].train.summary.total>0&&(!R[s].test||R[s].test.summary.total>0));
+  $('verdict').innerHTML='<b>'+(te?'On the check period':'On the tune period')+'</b>, <span class="dot" style="--c:'+COLORS[top.s]+'"></span><b>'+top.s+' · '+esc(top.sm.name)+'</b> did best: '+
+    '<span class="'+cls(top.sm.total)+'">'+signed(top.sm.total,0)+'</span> ('+(top.sm.return_pct>0?'+':'')+top.sm.return_pct+'% of its bucket) with a worst drawdown of '+inr(top.sm.max_dd,0)+'. '+
+    (te?(both.length?'Profitable in <b>both</b> periods: '+both.map(s=>s+' · '+esc(R[s].train.summary.name)).join(', ')+'.':'<span class="warn">No strategy was profitable in both periods with these settings.</span>'):'Add a check period to see whether it holds up.');
+  // comparison table
+  const per2=te?['train','test']:['train'];
+  let h='<tr><th></th>'+S.map(s=>'<th class="grp" colspan="'+per2.length+'" style="--c:'+COLORS[s]+'"><span class="dot" style="--c:'+COLORS[s]+'"></span>'+s+' · '+esc(R[s].train.summary.name)+'</th>').join('')+'</tr>';
+  h+='<tr><th></th>'+S.map(()=>per2.map(p=>'<th class="num">'+(p==='train'?'Tune':'Check')+'</th>').join('')).join('')+'</tr>';
+  ROWS.forEach(([k,label,t,dir])=>{
+    const chk=S.map(s=>R[s][per]?R[s][per].summary[k]:null);
+    let best=null;if(dir&&S.length>1){const n=chk.filter(v=>v!=null).map(Number);if(n.length>1){best=dir>0?Math.max(...n):Math.min(...n);if(n.every(v=>v===best))best=null}}
+    h+='<tr><td>'+label+'</td>'+S.map(s=>per2.map(p=>{const v=R[s][p]?R[s][p].summary[k]:null;
+      const isBest=p===per&&best!==null&&v!=null&&Number(v)===best;return '<td class="num'+(p==='test'?' chk-col':'')+(isBest?' best':'')+'">'+fmt(t,v)+'</td>'}).join('')).join('')+'</tr>'});
+  $('cmpTable').innerHTML=h;
+  // equity
+  document.querySelectorAll('#eqSeg button').forEach(b=>{b.style.display=(b.dataset.p==='test'&&!te)?'none':'';b.classList.toggle('on',b.dataset.p===(te?eqPeriod:'train'))});
+  renderEq();
+  $('detS').innerHTML=S.map(s=>'<option value="'+s+'">'+s+' · '+esc(R[s].train.summary.name)+'</option>').join('');
+  $('detP').innerHTML=(te?'<option value="test">Check period</option>':'')+'<option value="train">Tune period</option>';
+  renderDetail();
+  $('results').scrollIntoView({behavior:'smooth',block:'start'});
+}
+document.querySelectorAll('#eqSeg button').forEach(b=>b.onclick=()=>{eqPeriod=b.dataset.p;document.querySelectorAll('#eqSeg button').forEach(x=>x.classList.toggle('on',x===b));renderEq()});
+$('detS').onchange=renderDetail;$('detP').onchange=renderDetail;
+
+// ---------- chart ----------
+const tip=document.createElement('div');tip.className='tip';document.body.appendChild(tip);
+function showTip(h,x,y){tip.innerHTML=h;tip.style.opacity=1;const w=tip.offsetWidth;tip.style.left=Math.min(window.innerWidth-w-10,x+14)+'px';tip.style.top=(y+window.scrollY-10)+'px'}
+function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw)));const n=raw/p;return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p}
+function renderEq(){
+  const S=Object.keys(RES.strategies);const per=(eqPeriod==='test'&&RES.strategies[S[0]].test)?'test':'train';
+  const series=S.map(s=>({s,c:COLORS[s],d:RES.strategies[s][per].daily}));
+  $('eqLegend').innerHTML=series.map(x=>'<span><i style="background:'+x.c+'"></i>'+x.s+' · '+esc(RES.strategies[x.s].train.summary.name)+'</span>').join('');
+  const days=series[0].d.map(r=>r.day), n=days.length, el=$('eqChart');
+  const W=el.clientWidth||900,H=280,m={l:76,r:16,t:12,b:28};
+  const all=series.flatMap(x=>x.d.map(r=>r.equity));let lo=Math.min(0,...all),hi=Math.max(0,...all);if(lo===hi)hi=lo+1;
+  const st=niceStep((hi-lo)/4);lo=Math.floor(lo/st-1e-9)*st;hi=Math.ceil(hi/st-1e-9)*st;
+  const x=i=>n===1?(W+m.l-m.r)/2:m.l+(W-m.l-m.r)*i/(n-1), y=v=>m.t+(H-m.t-m.b)*(1-(v-lo)/(hi-lo));
+  let g='';for(let v=lo;v<=hi+st/2;v+=st){g+='<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--grid)"/><text x="'+(m.l-8)+'" y="'+(y(v)+4)+'" fill="var(--muted)" font-size="11" text-anchor="end">'+(v<0?'-':'')+'₹'+Math.abs(v).toLocaleString('en-IN')+'</text>'}
+  if(lo<0&&hi>0)g+='<line x1="'+m.l+'" x2="'+(W-m.r)+'" y1="'+y(0)+'" y2="'+y(0)+'" stroke="#5b6b8e"/>';
+  series.forEach(sr=>{g+='<polyline points="'+sr.d.map((r,i)=>x(i)+','+y(r.equity)).join(' ')+'" fill="none" stroke="'+sr.c+'" stroke-width="2" stroke-linejoin="round"/>'});
+  const every=Math.max(1,Math.ceil(n/8));days.forEach((d,i)=>{if(i%every===0)g+='<text x="'+x(i)+'" y="'+(H-m.b+16)+'" fill="var(--muted)" font-size="11" text-anchor="middle">'+new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short'})+'</text>'});
+  g+='<line class="xh" y1="'+m.t+'" y2="'+(H-m.b)+'" stroke="#5b6b8e" stroke-dasharray="3 3" opacity="0"/>';
+  series.forEach((sr,k)=>g+='<circle class="d'+k+'" r="5" fill="'+sr.c+'" stroke="#121a2e" stroke-width="2" opacity="0"/>');
+  g+='<rect class="hit" x="'+m.l+'" y="'+m.t+'" width="'+(W-m.l-m.r)+'" height="'+(H-m.t-m.b)+'" fill="transparent"/>';
+  el.innerHTML='<svg viewBox="0 0 '+W+' '+H+'" height="'+H+'" role="img" aria-label="Profit over time per strategy">'+g+'</svg>';
+  const svg=el.querySelector('svg'),hit=el.querySelector('.hit'),xh=el.querySelector('.xh');
+  hit.addEventListener('mousemove',e=>{const b=svg.getBoundingClientRect(),sx=(e.clientX-b.left)*W/b.width;
+    const i=n===1?0:Math.max(0,Math.min(n-1,Math.round((sx-m.l)/((W-m.l-m.r)/(n-1)))));
+    xh.setAttribute('x1',x(i));xh.setAttribute('x2',x(i));xh.setAttribute('opacity',1);
+    series.forEach((sr,k)=>{const d=el.querySelector('.d'+k);d.setAttribute('cx',x(i));d.setAttribute('cy',y(sr.d[i].equity));d.setAttribute('opacity',1)});
+    showTip('<b>'+dfmt(days[i])+'</b><br>'+series.map(sr=>'<span class="dot" style="--c:'+sr.c+'"></span>'+sr.s+' '+signed(sr.d[i].equity,0)+' <span class="meta">('+signed(sr.d[i].change,0)+' that day)</span>').join('<br>'),e.clientX,e.clientY)});
+  hit.addEventListener('mouseleave',()=>{tip.style.opacity=0;xh.setAttribute('opacity',0);series.forEach((sr,k)=>el.querySelector('.d'+k).setAttribute('opacity',0))});
+}
+let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>RES&&renderEq(),150)});
+
+// ---------- details ----------
+function renderDetail(){
+  const r=RES.strategies[$('detS').value][$('detP').value];if(!r)return;
+  const ex=r.summary.exits||{};
+  $('exitChips').innerHTML=Object.keys(ex).length?Object.entries(ex).map(([k,v])=>'<span class="chip">'+esc(k)+': <b>'+v.count+'</b> • <span class="'+cls(v.net)+'">'+signed(v.net,0)+'</span></span>').join(''):'<span class="meta">No closed trades.</span>';
+  $('dayTable').innerHTML='<tr><th>Date</th><th class="num">Close</th><th class="num">Trades closed</th><th class="num">Booked</th><th class="num">Change incl. open</th><th class="num">Total so far</th><th class="num">Open at close</th><th class="num">Capital used</th></tr>'+
+    r.daily.slice().reverse().map(d=>'<tr><td>'+dfmt(d.day)+'</td><td class="num">'+px(d.close)+'</td><td class="num">'+d.trades+'</td><td class="num '+cls(d.net)+'">'+signed(d.net)+'</td><td class="num '+cls(d.change)+'">'+signed(d.change)+'</td><td class="num">'+signed(d.equity)+'</td><td class="num">'+d.open+'</td><td class="num">'+inr(d.used,0)+'</td></tr>').join('');
+  const T=r.trades;
+  $('tradeMeta').textContent='('+r.summary.trades+' closed'+(r.summary.trades>T.length?', newest '+T.length+' shown':'')+(r.open.length?' • '+r.open.length+' open at end':'')+')';
+  $('tradeTable').innerHTML=(T.length||r.open.length)?'<tr><th>Bought</th><th class="num">Buy</th><th class="num">Shares</th><th>Sold</th><th class="num">Sell</th><th>Why</th><th class="num">Charges</th><th class="num">Net P&L</th><th class="num">Held</th></tr>'+
+    r.open.map(o=>'<tr><td>'+esc(o.entry_ts)+'</td><td class="num">'+px(o.entry)+'</td><td class="num">'+o.qty+'</td><td><span class="warn">still open</span></td><td class="num">-</td><td class="meta">target '+px(o.target)+(o.stop?' • stop '+px(o.stop):'')+'</td><td class="num">-</td><td class="num '+cls(o.pnl)+'">'+signed(o.pnl)+'</td><td class="num">-</td></tr>').join('')+
+    T.map(t=>'<tr><td>'+esc(t.entry_ts)+'</td><td class="num">'+px(t.entry)+'</td><td class="num">'+t.qty+'</td><td>'+esc(t.exit_ts)+'</td><td class="num">'+px(t.exit)+'</td><td>'+esc(t.reason)+'</td><td class="num">'+inr(t.charges)+'</td><td class="num '+cls(t.net)+'">'+signed(t.net)+'</td><td class="num">'+hrs(t.hold_h)+'</td></tr>').join(''):'<tr><td class="empty">No trades in this period.</td></tr>';
+}
+
+// ---------- optimiser ----------
+const PARAM_LABEL={spacing_pct:'drop %',target_pct:'target %',rsi_max:'RSI ≤',rsi_buy:'RSI buy',sl_pct:'stop %',vwap_filter:'VWAP',vol_mult:'vol ×',r_multiple:'R',sl_mode:'stop',trail_pct:'trail %',max_positions:'max pos'};
+function pfmt(p){return Object.entries(p).map(([k,v])=>(PARAM_LABEL[k]||k)+' '+(v===null?'off':v===true?'on':v===false?'off':v)).join(' • ')}
+async function optimise(s){
+  clearTimeout(jobTimer);
+  $('optBox').style.display='block';$('optTitle').innerHTML='<span class="dot" style="--c:'+COLORS[s]+'"></span>Optimiser – '+s+' · '+STRATS[s].name;
+  $('optTable').innerHTML='';$('optBar').style.width='0';$('optMsg').textContent='Starting…';
+  $('optBox').scrollIntoView({behavior:'smooth',block:'start'});
+  try{const r=await post('/iifl/api/lab/optimize',{...body(),strategy:s});poll(r.job,s)}catch(e){$('optMsg').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+}
+async function poll(job,s){
+  let j;try{j=await api('/iifl/api/lab/jobs/'+job)}catch(e){$('optMsg').innerHTML='<span class="err">'+esc(e.message)+'</span>';return}
+  $('optBar').style.width=(100*j.done/Math.max(1,j.total))+'%';
+  if(j.status==='running'){$('optMsg').textContent='Testing '+j.done+' of '+j.total+' settings on the tune period…';jobTimer=setTimeout(()=>poll(job,s),800);return}
+  if(j.status==='error'){$('optMsg').innerHTML='<span class="err">'+esc(j.error)+'</span>';return}
+  const res=j.result;window._opt={s,best:res.best};
+  $('optMsg').textContent='Tested '+res.tested+' settings. Top 5 by tune result (P&L minus half the drawdown), with how each did on the check period:';
+  $('optTable').innerHTML='<tr><th>#</th><th>Settings</th><th class="num">Tune P&L</th><th class="num">Tune drawdown</th><th class="num">Tune trades</th><th class="num">Check P&L</th><th class="num">Check drawdown</th><th class="num">Check trades</th><th></th></tr>'+
+    res.best.map((b,i)=>'<tr><td>'+(i+1)+'</td><td style="white-space:normal;min-width:240px">'+esc(pfmt(b.params))+'</td>'+
+      '<td class="num '+cls(b.train.total)+'">'+signed(b.train.total,0)+'</td><td class="num neg">-'+inr(b.train.max_dd,0)+'</td><td class="num">'+b.train.trades+'</td>'+
+      (b.test?'<td class="num '+cls(b.test.total)+'">'+signed(b.test.total,0)+'</td><td class="num neg">-'+inr(b.test.max_dd,0)+'</td><td class="num">'+b.test.trades+'</td>':'<td colspan="3" class="meta">no check period</td>')+
+      '<td><button class="secondary btn-sm" onclick="useOpt('+i+')">Use</button></td></tr>').join('');
+}
+function useOpt(i){const o=window._opt;setStratValues(o.s,o.best[i].params);$('en_'+o.s).checked=true;compare()}
+
+loadSyms();
+</script>
+</body>
+</html>
