@@ -74,6 +74,14 @@ def _strategy_params(s, raw, g):
                 "sl_mode": raw.get("sl_mode", "orb"), "sl_pct": _f(raw.get("sl_pct"), 1),
                 "trail_pct": _f(raw.get("trail_pct"), 0), "max_trades_day": _i(raw.get("max_trades_day"), 1),
                 "max_positions": 1}
+    if s == "E":
+        mode = "momentum" if raw.get("mode") == "momentum" else "dip"
+        return {**common, "mode": mode, "product": "DELIVERY" if raw.get("product") == "DELIVERY" else "INTRADAY",
+                "rsi_level": _f(raw.get("rsi_level"), 60 if mode == "momentum" else 30),
+                "rsi_exit": _f(raw.get("rsi_exit")), "vol_mult": _f(raw.get("vol_mult"), 2),
+                "target_pct": _f(raw.get("target_pct"), 0), "sl_pct": _f(raw.get("sl_pct"), 0),
+                "trail_pct": _f(raw.get("trail_pct"), 0), "max_trades_day": _i(raw.get("max_trades_day"), 3),
+                "cooldown_bars": _i(raw.get("cooldown_bars"), 0)}
     return {**common, "target_pct": _f(raw.get("target_pct"), 0.3), "sl_pct": _f(raw.get("sl_pct"), 0.3)}
 
 
@@ -172,7 +180,7 @@ def optimize():
         # keep the table small
         for k in [k for k, v in _jobs.items() if time.time() - v["started"] > 3600]:
             _jobs.pop(k, None)
-        _jobs[job_id] = {"status": "running", "done": 0, "total": len(lb.combos(s)), "started": time.time(),
+        _jobs[job_id] = {"status": "running", "done": 0, "total": len(lb.combos(s, base)), "started": time.time(),
                          "strategy": s, "result": None, "error": None}
 
     def progress(done, total):

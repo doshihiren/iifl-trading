@@ -6,7 +6,7 @@
   <title>Strategy Lab</title>
   <style>
     :root{--bg:#0b1020;--panel:#121a2e;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--grid:#1d2842;--blue:#6ea8fe;
-      --sA:#3987e5;--sB:#d95926;--sC:#199e70;--sD:#c98500;--good:#32d583;--bad:#ff6b6b}
+      --sA:#3987e5;--sB:#d95926;--sC:#199e70;--sD:#c98500;--sE:#d55181;--good:#32d583;--bad:#ff6b6b}
     *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#08101f,#0f1730);font-family:Inter,system-ui,Arial,sans-serif;color:var(--text)}
     .wrap{max-width:1440px;margin:auto;padding:24px 18px 60px}
     .top{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap}
@@ -152,7 +152,7 @@
 
 <script>
 const $=id=>document.getElementById(id);
-const COLORS={A:'var(--sA)',B:'var(--sB)',C:'var(--sC)',D:'var(--sD)'};
+const COLORS={A:'var(--sA)',B:'var(--sB)',C:'var(--sC)',D:'var(--sD)',E:'var(--sE)'};
 let SYMS=[], RES=null, eqPeriod='test', jobTimer=null;
 function esc(v){return String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function inr(v,d=2){if(v===null||v===undefined||v==='')return '-';const n=Number(v);return (n<0?'-':'')+'₹'+Math.abs(n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d})}
@@ -174,6 +174,11 @@ const STRATS={
      f:[{k:'rsi_buy',l:'Buy when RSI crosses up',v:30,s:1},{k:'rsi_exit',l:'Sell when RSI ≥ (blank = off)',v:70,s:1},{k:'target_pct',l:'Target %',v:0.8,s:0.05},{k:'sl_pct',l:'Stop loss %',v:0.7,s:0.05},{k:'vwap_filter',l:'Only when price ≥ VWAP',t:'check',v:true},SIZING('B','risk'),{k:'shares',l:'Shares (if fixed)',v:100,s:1}]},
   C:{name:'Volume breakout',tag:'INTRADAY • Active bucket',on:true,desc:'After the opening range, buys when a candle <b>closes above the range high on N× average volume</b>. Stop at range low (or %), target = R × risk, optional trailing stop.',
      f:[{k:'vol_mult',l:'Volume ≥ N × average',v:2,s:0.1},{k:'r_multiple',l:'Target = R × risk',v:2,s:0.1},{k:'sl_mode',l:'Stop at',t:'select',o:[['orb','Opening-range low'],['pct','Fixed %']],v:'orb'},{k:'sl_pct',l:'Stop % (if fixed)',v:1,s:0.05},{k:'trail_pct',l:'Trailing stop % (0 = off)',v:0,s:0.05},{k:'max_trades_day',l:'Max trades per day',v:1,s:1},SIZING('C','risk'),{k:'shares',l:'Shares (if fixed)',v:100,s:1}]},
+  E:{name:'RSI + Volume',tag:'INTRADAY or DELIVERY • Active bucket',on:true,desc:'<b>Pure RSI + volume.</b> Dip mode: RSI crosses back <b>up through 30</b> on <b>N× average volume</b>, sells at RSI 70 / target / stop. Momentum mode: RSI crosses <b>up through 60</b> on N× volume, sells when RSI falls below 50.',
+     f:[{k:'mode',l:'Mode',t:'select',o:[['dip','Dip buy (bounce)'],['momentum','Momentum (breakout)']],v:'dip'},{k:'product',l:'Product',t:'select',o:[['INTRADAY','Intraday (exit 15:10)'],['DELIVERY','Delivery (hold overnight)']],v:'INTRADAY'},
+        {k:'rsi_level',l:'Buy when RSI crosses up',v:30,s:1},{k:'rsi_exit',l:'RSI exit level (blank = off)',v:70,s:1},{k:'vol_mult',l:'Volume ≥ N × average',v:2,s:0.1},{k:'target_pct',l:'Target % (0 = off)',v:1.2,s:0.05},
+        {k:'sl_pct',l:'Stop loss %',v:0.8,s:0.05},{k:'trail_pct',l:'Trailing stop % (0 = off)',v:0,s:0.05},{k:'max_trades_day',l:'Max trades per day',v:3,s:1},{k:'cooldown_bars',l:'Wait candles after a stop',v:3,s:1},
+        {k:'max_positions',l:'Max positions at once',v:1,s:1},SIZING('E','risk'),{k:'shares',l:'Shares (if fixed)',v:100,s:1}]},
   D:{name:'Scalp',tag:'INTRADAY • Active bucket',on:false,desc:'Buys on <b>every candle</b> up to the max positions, small target and stop, 15:10 exit. Shows how much charges take from very frequent trading.',
      f:[{k:'target_pct',l:'Target %',v:0.3,s:0.05},{k:'sl_pct',l:'Stop loss %',v:0.3,s:0.05},{k:'max_positions',l:'Max positions',v:1,s:1},SIZING('D','shares'),{k:'shares',l:'Shares (if fixed)',v:100,s:1}]},
 };
@@ -190,6 +195,7 @@ $('strats').innerHTML=Object.entries(STRATS).map(([s,d])=>
 function stratValues(s){const o={enabled:$('en_'+s).checked};STRATS[s].f.forEach(f=>{const el=$('p_'+s+'_'+f.k);o[f.k]=f.t==='check'?el.checked:el.value});o.risk_per_trade=$('risk').value;return o}
 function setStratValues(s,params){Object.entries(params).forEach(([k,v])=>{const el=$('p_'+s+'_'+k);if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=(v===null?'':v)})}
 
+$('p_E_mode').addEventListener('change',()=>{const m=$('p_E_mode').value;$('p_E_rsi_level').value=m==='momentum'?60:30;$('p_E_rsi_exit').value=m==='momentum'?50:70});
 $('chMode').addEventListener('change',()=>{$('chPct').style.display=$('chMode').value==='custom'?'block':'none'});
 
 function body(){
@@ -235,7 +241,7 @@ async function checkStock(){
 function updateWarn(){
   const L=LIQ;if(!L)return;const w=[];
   if(!L.has_volume) w.push('⚠ No volume data in the candles – the volume-breakout filter is skipped and VWAP uses average price.');
-  ['A','B','C','D'].forEach(s=>{const sh=Number($('p_'+s+'_shares').value);const sz=$('p_'+s+'_sizing');const fixed=!sz||sz.value==='shares';
+  ['A','B','C','D','E'].forEach(s=>{const sh=Number($('p_'+s+'_shares').value);const sz=$('p_'+s+'_sizing');const fixed=!sz||sz.value==='shares';
     $('sizeHint_'+s).textContent=fixed&&L.price?('One order ≈ '+inr(sh*L.price,0)):'';
     if(fixed&&L.safe_order_qty&&sh>L.safe_order_qty) w.push('⚠ '+s+': '+sh+' shares per order is above the safe size ('+L.safe_order_qty+'); real fills would be worse than tested.')});
   if(L.median_1m_volume<200) w.push('⚠ Thin stock: very few shares trade per minute, so 1-minute strategies are hard to fill at these prices.');
@@ -253,6 +259,7 @@ const ROWS=[['total','Total P&L (incl. open, after charges)','money',1],['return
   ['trades','Closed trades','int',0],['win_rate','Win rate','pct0',1],['profit_factor','Profit factor (wins ÷ losses)','num',1],['expectancy','Avg P&L per trade','money',1],
   ['max_dd','Worst drawdown','dd',-1],['max_dd_pct','Worst drawdown % of bucket','ddp',-1],['longest_dd_days','Longest time below a high (days)','int',-1],
   ['green_days','Green days','int',1],['red_days','Red days','int',-1],['best_day','Best day','money',1],['worst_day','Worst day','money',1],['limit_days','Days loss limit hit','int',-1],
+  ['sig_cross','RSI signals seen','int',0],['sig_vol','…with enough volume','int',0],['sig_cool','…skipped (cool-down / day max / busy)','int',0],
   ['open_count','Open at end','int',0],['open_pnl','Open positions P&L','money',1],['core_pnl','Core shares P&L','money',1],['peak_capital','Peak capital used','money0',0],['avg_capital','Avg capital used','money0',0],['avg_hold_h','Avg holding time','hrs',0]];
 function fmt(t,v){if(v===null||v===undefined)return '-';
   if(t==='money')return '<span class="'+cls(v)+'">'+signed(v)+'</span>';if(t==='money0')return inr(v,0);
@@ -277,9 +284,12 @@ function render(){
   let h='<tr><th></th>'+S.map(s=>'<th class="grp" colspan="'+per2.length+'" style="--c:'+COLORS[s]+'"><span class="dot" style="--c:'+COLORS[s]+'"></span>'+s+' · '+esc(R[s].train.summary.name)+'</th>').join('')+'</tr>';
   h+='<tr><th></th>'+S.map(()=>per2.map(p=>'<th class="num">'+(p==='train'?'Tune':'Check')+'</th>').join('')).join('')+'</tr>';
   ROWS.forEach(([k,label,t,dir])=>{
-    const chk=S.map(s=>R[s][per]?R[s][per].summary[k]:null);
+    const val=(sm,k)=>{if(!sm)return null;if(k.startsWith('sig_')){const g=sm.signals;if(!g)return null;
+        return k==='sig_cross'?g.rsi_cross:k==='sig_vol'?g.vol_ok:g.blocked_cooldown+g.blocked_day_max+g.blocked_busy}return sm[k]};
+    const chk=S.map(s=>R[s][per]?val(R[s][per].summary,k):null);
     let best=null;if(dir&&S.length>1){const n=chk.filter(v=>v!=null).map(Number);if(n.length>1){best=dir>0?Math.max(...n):Math.min(...n);if(n.every(v=>v===best))best=null}}
-    h+='<tr><td>'+label+'</td>'+S.map(s=>per2.map(p=>{const v=R[s][p]?R[s][p].summary[k]:null;
+    if(k.startsWith('sig_')&&!S.includes('E'))return;
+    h+='<tr><td>'+label+'</td>'+S.map(s=>per2.map(p=>{const v=R[s][p]?val(R[s][p].summary,k):null;
       const isBest=p===per&&best!==null&&v!=null&&Number(v)===best;return '<td class="num'+(p==='test'?' chk-col':'')+(isBest?' best':'')+'">'+fmt(t,v)+'</td>'}).join('')).join('')+'</tr>'});
   $('cmpTable').innerHTML=h;
   // equity
@@ -335,11 +345,11 @@ function renderDetail(){
   $('tradeMeta').textContent='('+r.summary.trades+' closed'+(r.summary.trades>T.length?', newest '+T.length+' shown':'')+(r.open.length?' • '+r.open.length+' open at end':'')+')';
   $('tradeTable').innerHTML=(T.length||r.open.length)?'<tr><th>Bought</th><th class="num">Buy</th><th class="num">Shares</th><th>Sold</th><th class="num">Sell</th><th>Why</th><th class="num">Charges</th><th class="num">Net P&L</th><th class="num">Held</th></tr>'+
     r.open.map(o=>'<tr><td>'+esc(o.entry_ts)+'</td><td class="num">'+px(o.entry)+'</td><td class="num">'+o.qty+'</td><td><span class="warn">still open</span></td><td class="num">-</td><td class="meta">target '+px(o.target)+(o.stop?' • stop '+px(o.stop):'')+'</td><td class="num">-</td><td class="num '+cls(o.pnl)+'">'+signed(o.pnl)+'</td><td class="num">-</td></tr>').join('')+
-    T.map(t=>'<tr><td>'+esc(t.entry_ts)+'</td><td class="num">'+px(t.entry)+'</td><td class="num">'+t.qty+'</td><td>'+esc(t.exit_ts)+'</td><td class="num">'+px(t.exit)+'</td><td>'+esc(t.reason)+'</td><td class="num">'+inr(t.charges)+'</td><td class="num '+cls(t.net)+'">'+signed(t.net)+'</td><td class="num">'+hrs(t.hold_h)+'</td></tr>').join(''):'<tr><td class="empty">No trades in this period.</td></tr>';
+    T.map(t=>'<tr><td>'+esc(t.entry_ts)+(t.rsi!=null?'<div class="meta">RSI '+t.rsi+(t.volx!=null?' • vol '+t.volx+'×':'')+'</div>':'')+'</td><td class="num">'+px(t.entry)+'</td><td class="num">'+t.qty+'</td><td>'+esc(t.exit_ts)+'</td><td class="num">'+px(t.exit)+'</td><td>'+esc(t.reason)+'</td><td class="num">'+inr(t.charges)+'</td><td class="num '+cls(t.net)+'">'+signed(t.net)+'</td><td class="num">'+hrs(t.hold_h)+'</td></tr>').join(''):'<tr><td class="empty">No trades in this period.</td></tr>';
 }
 
 // ---------- optimiser ----------
-const PARAM_LABEL={spacing_pct:'drop %',target_pct:'target %',rsi_max:'RSI ≤',rsi_buy:'RSI buy',sl_pct:'stop %',vwap_filter:'VWAP',vol_mult:'vol ×',r_multiple:'R',sl_mode:'stop',trail_pct:'trail %',max_positions:'max pos'};
+const PARAM_LABEL={rsi_level:'RSI cross',spacing_pct:'drop %',target_pct:'target %',rsi_max:'RSI ≤',rsi_buy:'RSI buy',sl_pct:'stop %',vwap_filter:'VWAP',vol_mult:'vol ×',r_multiple:'R',sl_mode:'stop',trail_pct:'trail %',max_positions:'max pos'};
 function pfmt(p){return Object.entries(p).map(([k,v])=>(PARAM_LABEL[k]||k)+' '+(v===null?'off':v===true?'on':v===false?'off':v)).join(' • ')}
 async function optimise(s){
   clearTimeout(jobTimer);

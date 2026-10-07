@@ -125,6 +125,7 @@ Check what IIFL returns for candles: `python tools.py candles-check SBC`
 Dashboard → **🧪 Strategy Lab** (uses the candles downloaded on the Analysis page; the Analysis and RSI Analysis pages are unchanged).
 - **A Core ladder** (DELIVERY): buy only after the price falls X% below the last open buy, own target per lot, optional core shares never sold.
 - **B RSI bounce**, **C Volume breakout**, **D Scalp** (INTRADAY, squared off 15:10) with stop losses, risk-based sizing and a daily loss limit.
+- **E RSI + Volume** (intraday or delivery): *Dip* mode buys when RSI crosses back up through 30 on N× average volume (sell at RSI 70 / target / stop); *Momentum* mode buys when RSI crosses up through 60 on N× volume (sell when RSI falls below 50). Cool-down after a stop, max trades per day. The results show how many RSI signals appeared and how many had enough volume.
 - Pick a **tune** period and a **check** period (auto split ⅔ / ⅓). The optimiser ranks settings on the tune period and shows how each did on the check period.
 - Charges: approximate NSE statutory charges + your brokerage per order (or a custom %).
 

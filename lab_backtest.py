@@ -10,6 +10,13 @@ Four strategies run on the same stored 1-minute candles:
   C  Volume breakout         close above the opening-range high with volume
      (INTRADAY)              >= N x average; stop at range low or %, target = R x risk.
   D  Scalp (INTRADAY)        buy every bar, small target, stop, 15:10 exit.
+  E  RSI + Volume            pure RSI + volume rules. Mode "dip": RSI crosses back
+     (INTRADAY or DELIVERY)  up through a low level (e.g. 30) on >= N x average
+                             volume; exit at target / stop / RSI >= exit level.
+                             Mode "momentum": RSI crosses up through a high level
+                             (e.g. 60) on >= N x volume; exit when RSI falls back
+                             below the exit level (e.g. 50), target or stop.
+                             Cool-down after a stop loss, max trades per day.
 
 Mechanics shared by all strategies
   * Signals are decided when a 1m/5m/15m bar CLOSES and filled at the next
@@ -26,9 +33,9 @@ import math
 from datetime import datetime
 
 TF_MIN = {"1m": 1, "5m": 5, "15m": 15}
-STRATEGIES = ("A", "B", "C", "D")
-NAMES = {"A": "Core ladder", "B": "RSI bounce", "C": "Volume breakout", "D": "Scalp"}
-INTRADAY = {"A": False, "B": True, "C": True, "D": True}
+STRATEGIES = ("A", "B", "C", "D", "E")
+NAMES = {"A": "Core ladder", "B": "RSI bounce", "C": "Volume breakout", "D": "Scalp", "E": "RSI + Volume"}
+INTRADAY = {"A": False, "B": True, "C": True, "D": True, "E": True}
 
 # Approximate NSE equity cash charges (verify against your contract note).
 CHARGE_RATES = {
@@ -196,6 +203,8 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
     c, bars = prep.c, prep.bars
     b = prep.n - 1 if b is None else b
     intraday = INTRADAY[strat]
+    if strat == "E":
+        intraday = p.get("product", "INTRADAY") != "DELIVERY"
     product = "INTRADAY" if intraday else "DELIVERY"
     bucket = float(g["core_capital"] if strat == "A" else g["active_capital"])
     tick = float(g.get("tick") or 0.05)
@@ -225,6 +234,8 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
     cap_n = 0
     daily = []
     core = None
+    last_stop_i = None       # 1m index of the last stop-loss exit (E cool-down)
+    sig = {"rsi_cross": 0, "vol_ok": 0, "blocked_cooldown": 0, "blocked_day_max": 0, "blocked_busy": 0}
 
     def used():
         return sum(x["entry"] * x["qty"] for x in pos)
@@ -232,7 +243,7 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
     def open_value(px):
         return sum((px - x["entry"]) * x["qty"] for x in pos)
 
-    def buy(i, price, stop=None, target=None):
+    def buy(i, price, stop=None, target=None, info=None):
         nonlocal charges_total, last_buy, day_trades, peak_cap
         free = bucket - used()
         q = _qty(p, price, stop, free)
@@ -241,14 +252,16 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
         ch = leg_charges(price * q, "BUY", product, brok, custom)
         charges_total += ch
         pos.append({"entry": price, "qty": q, "stop": stop, "target": target, "i": i, "ts": c[i]["ts"],
-                    "buy_ch": ch, "high": price})
+                    "buy_ch": ch, "high": price, "info": info or {}})
         last_buy = price
         day_trades += 1
         peak_cap = max(peak_cap, used())
         return True
 
     def sell(x, i, price, reason):
-        nonlocal realized, charges_total
+        nonlocal realized, charges_total, last_stop_i
+        if reason.startswith("Stop"):
+            last_stop_i = i
         pos.remove(x)
         ch = leg_charges(price * x["qty"], "SELL", product, brok, custom)
         charges_total += ch
@@ -258,7 +271,7 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
         trades.append({"entry_ts": x["ts"], "entry": round(x["entry"], 2), "qty": x["qty"],
                        "exit_ts": c[i]["ts"], "exit": round(price, 2), "gross": round(gross, 2),
                        "charges": round(x["buy_ch"] + ch, 2), "net": round(net, 2), "reason": reason,
-                       "hold_h": round(_hours(x["ts"], c[i]["ts"]), 2)})
+                       "hold_h": round(_hours(x["ts"], c[i]["ts"]), 2), **x["info"]})
 
     def equity(px):
         """Booked profit (after all charges) + open positions (after their buy charges) + core."""
@@ -313,8 +326,8 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
                     target = _tick_ceil(o + p["r_multiple"] * (o - stop), tick)
                 else:
                     stop = _tick_floor(o * (1 - p["sl_pct"] / 100), tick) if p.get("sl_pct") else None
-                    target = _tick_ceil(o * (1 + p["target_pct"] / 100), tick)
-                buy(i, o, stop, target)
+                    target = _tick_ceil(o * (1 + p["target_pct"] / 100), tick) if p.get("target_pct") else None
+                buy(i, o, stop, target, info=info.get("sig"))
 
         # ---- stops / targets on this 1-minute candle
         for x in list(pos):
@@ -365,6 +378,35 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
                 want = (rng is not None and after and bar["c"] > rng[0] and vol_ok and not pos
                         and day_trades < int(p.get("max_trades_day") or 1))
                 info = {"orb_low": rng[1] if rng else None}
+            elif strat == "E":
+                level = p["rsi_level"]
+                ex = p.get("rsi_exit")
+                if pos and ex not in (None, "") and r is not None:
+                    if p.get("mode") == "momentum" and r < ex:
+                        pending_exit = pending_exit or "RSI faded"
+                    elif p.get("mode") != "momentum" and r >= ex:
+                        pending_exit = pending_exit or "RSI exit"
+                cross = r is not None and r_prev is not None and r_prev < level <= r
+                ratio = (bar["v"] / prep.avgvol[j]) if (prep.has_volume and prep.avgvol[j]) else None
+                vol_ok = (not prep.has_volume) or (ratio is not None and ratio >= p["vol_mult"])
+                if cross:
+                    sig["rsi_cross"] += 1
+                    if vol_ok:
+                        sig["vol_ok"] += 1
+                cool = p.get("cooldown_bars") or 0
+                cool_ok = last_stop_i is None or prep.day[last_stop_i] != d or \
+                    (i - last_stop_i) >= cool * TF_MIN[prep.tf]
+                want = cross and vol_ok
+                if want and not cool_ok:
+                    sig["blocked_cooldown"] += 1
+                    want = False
+                if want and day_trades >= int(p.get("max_trades_day") or 99):
+                    sig["blocked_day_max"] += 1
+                    want = False
+                if want and len(pos) >= max_pos:
+                    sig["blocked_busy"] += 1
+                    want = False
+                info = {"sig": {"rsi": round(r, 1), "volx": round(ratio, 2) if ratio is not None else None}} if want else {}
             else:  # D
                 want = len(pos) < max_pos
             if want and (not intraday or prep.minute[i] + 1 < last_entry):
@@ -409,7 +451,8 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
             longest = max(longest, run)
     changes = [r["change"] for r in daily]
     summary = {
-        "strategy": strat, "name": NAMES[strat], "product": product,
+        "strategy": strat, "name": NAMES[strat] + (f" ({'momentum' if p.get('mode') == 'momentum' else 'dip'})" if strat == "E" else ""),
+        "product": product,
         "trades": len(trades), "wins": len(wins), "losses": len(losses),
         "win_rate": round(100 * len(wins) / len(trades), 1) if trades else 0.0,
         "net_closed": round(sum(nets), 2),
@@ -434,6 +477,7 @@ def simulate(prep, strat, p, g, a=0, b=None, detail=True):
         "worst_day": round(min(changes), 2) if changes else 0.0,
         "longest_dd_days": longest,
         "limit_days": limit_days,
+        "signals": sig if strat == "E" else None,
         "avg_hold_h": round(sum(t["hold_h"] for t in trades) / len(trades), 2) if trades else None,
         "from": c[a]["ts"] if b >= a else None, "to": c[b]["ts"] if b >= a else None,
     }
@@ -468,11 +512,15 @@ GRIDS = {
     "B": {"rsi_buy": [25, 30, 35], "target_pct": [0.5, 0.8, 1.2], "sl_pct": [0.4, 0.7, 1.0], "vwap_filter": [False, True]},
     "C": {"vol_mult": [1.5, 2, 3], "r_multiple": [1, 1.5, 2], "sl_mode": ["orb", "pct"], "trail_pct": [0, 0.5]},
     "D": {"target_pct": [0.2, 0.3, 0.5], "sl_pct": [0.2, 0.3, 0.5], "max_positions": [1, 3, 5]},
+    "E": {"rsi_level": [25, 30, 35], "vol_mult": [1.5, 2, 3], "target_pct": [0.8, 1.2, 2], "sl_pct": [0.5, 0.8, 1.2]},
 }
+E_MOMENTUM_LEVELS = [55, 60, 65]
 
 
-def combos(strat):
-    grid = GRIDS[strat]
+def combos(strat, base=None):
+    grid = dict(GRIDS[strat])
+    if strat == "E" and (base or {}).get("mode") == "momentum":
+        grid["rsi_level"] = E_MOMENTUM_LEVELS
     keys = list(grid)
     out = [{}]
     for k in keys:
@@ -489,7 +537,7 @@ def score(s):
 
 def optimize(prep, strat, base, g, train, test, progress=None, top=5):
     results = []
-    cs = combos(strat)
+    cs = combos(strat, base)
     for n, cmb in enumerate(cs):
         p = {**base, **cmb}
         s = simulate(prep, strat, p, g, train[0], train[1], detail=False)["summary"]

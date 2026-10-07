@@ -152,6 +152,62 @@ class TestDailyLimit(unittest.TestCase):
         self.assertTrue(any(t["entry_ts"].startswith("2026-09-02") for t in r["trades"] + r["open"]))
 
 
+class TestRsiVolume(unittest.TestCase):
+    E = {"mode": "dip", "rsi_level": 30, "rsi_exit": 70, "vol_mult": 2, "target_pct": 1.0, "sl_pct": 1.0,
+         "trail_pct": 0, "product": "INTRADAY", "max_trades_day": 5, "cooldown_bars": 0, "max_positions": 1,
+         "shares": 10, "sizing": "shares"}
+
+    def series(self, closes, vols, day="2026-09-01"):
+        return [mk(day, f"{(555 + k) // 60:02d}:{(555 + k) % 60:02d}", c, v=v) for k, (c, v) in enumerate(zip(closes, vols))]
+
+    def test_dip_buy_on_volume(self):
+        # RSI(3) falls to 0, then one up-move -> RSI 33.3 crosses 30 on 5x volume at 09:20
+        cs = self.series([100, 99, 98, 97, 96, 97, 97], [1000] * 5 + [5000, 1000])
+        cs.append(mk("2026-09-01", "09:22", 97.5, h=98.2, l=97.4, c=98))      # high reaches the 97.97 target
+        r = run(cs, "E", self.E, rsi_period=3, vol_lookback=3)
+        t = r["trades"][0]
+        self.assertEqual((t["entry_ts"][11:], t["entry"], t["exit"], t["reason"]), ("09:21", 97, 97.97, "Target"))
+        self.assertEqual(t["rsi"], 33.3)
+        self.assertEqual(t["volx"], 5.0)
+        self.assertEqual(r["summary"]["signals"]["rsi_cross"], 1)
+
+    def test_signal_without_volume_is_skipped(self):
+        cs = self.series([100, 99, 98, 97, 96, 97, 97, 99], [1000] * 8)
+        r = run(cs, "E", self.E, rsi_period=3, vol_lookback=3)
+        self.assertEqual(r["summary"]["trades"], 0)
+        self.assertEqual((r["summary"]["signals"]["rsi_cross"], r["summary"]["signals"]["vol_ok"]), (1, 0))
+
+    def test_momentum_exits_when_rsi_fades(self):
+        p = {**self.E, "mode": "momentum", "rsi_level": 60, "rsi_exit": 50, "target_pct": 5}
+        closes = [100, 100.5, 100, 100.5, 100, 101.5, 101.5, 100.5, 100.5]
+        cs = self.series(closes, [1000] * 5 + [5000, 1000, 1000, 1000])
+        r = run(cs, "E", p, rsi_period=3, vol_lookback=3)
+        t = r["trades"][0]
+        self.assertEqual((t["entry"], t["reason"]), (101.5, "RSI faded"))
+
+    def test_cooldown_after_stop(self):
+        closes = [100, 99, 98, 97, 96, 97, 90, 89, 88, 87, 90, 90]     # 2nd cross at 09:25 (RSI 60)
+        vols = [1000] * 5 + [5000, 1000, 1000, 1000, 1000, 9000, 1000]
+        p = {**self.E, "cooldown_bars": 10}
+        r = run(cs := self.series(closes, vols), "E", p, rsi_period=3, vol_lookback=3)
+        self.assertEqual(r["summary"]["trades"], 1)
+        self.assertEqual(r["trades"][0]["reason"], "Stop (gap)")
+        self.assertEqual(r["summary"]["signals"]["blocked_cooldown"], 1)
+        r2 = run(cs, "E", {**p, "cooldown_bars": 0}, rsi_period=3, vol_lookback=3)
+        self.assertEqual(r2["summary"]["trades"] + r2["summary"]["open_count"], 2)
+
+    def test_delivery_holds_overnight(self):
+        cs = self.series([100, 99, 98, 97, 96, 97, 97], [1000] * 5 + [5000, 1000])
+        cs += self.series([97.5], [1000], day="2026-09-02")
+        r = run(cs, "E", {**self.E, "product": "DELIVERY", "rsi_exit": None}, rsi_period=3, vol_lookback=3)
+        self.assertEqual(r["summary"]["product"], "DELIVERY")
+        self.assertEqual(r["summary"]["open_count"], 1)
+
+    def test_optimizer_grid_follows_mode(self):
+        self.assertEqual(len(lb.combos("E", {"mode": "dip"})), 81)
+        self.assertEqual({c["rsi_level"] for c in lb.combos("E", {"mode": "momentum"})}, {55, 60, 65})
+
+
 class TestOptimizer(unittest.TestCase):
     def test_runs_grid_and_tests_best(self):
         d1, d2 = "2026-09-01", "2026-09-02"
