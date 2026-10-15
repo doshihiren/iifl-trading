@@ -33,7 +33,16 @@
     .techbox{display:none;margin-top:14px;background:#0d1528;border:1px solid var(--line);border-radius:14px;padding:14px}.techbox.show{display:block}
     .techgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.techitem{background:#10192b;border:1px solid #263450;border-radius:12px;padding:12px}.techitem b{display:block;font-size:20px;margin-top:4px}.techitem span{font-size:11px;color:var(--muted)}
     .techwhy{margin-top:10px;font-size:12px;color:#aeb9d1;line-height:1.5}.signal-buy{color:var(--green)}.signal-sell{color:var(--red)}.signal-hold{color:var(--amber)}
-    @media(max-width:850px){.grid{grid-template-columns:1fr}.formgrid{grid-template-columns:1fr}.stats{grid-template-columns:1fr}.techgrid{grid-template-columns:repeat(2,1fr)}.wide{grid-column:auto}}
+    .section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 10px}.section-head h3{margin:0;font-size:13px;color:#cfe0ff}.section-head span{font-size:11px;color:var(--muted)}
+    details.advanced{margin:14px 0;border:1px solid var(--line);border-radius:14px;background:#0c1426;overflow:hidden}details.advanced summary{cursor:pointer;padding:13px 14px;font-weight:800;font-size:13px;color:#cfe0ff;list-style:none}details.advanced summary::-webkit-details-marker{display:none}details.advanced summary:after{content:'+';float:right;color:var(--blue);font-size:18px;line-height:14px}details.advanced[open] summary:after{content:'−'}details.advanced .inside{padding:0 14px 14px}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tabbtn{background:#18223a;color:#b9c7e5;padding:9px 14px;border-radius:10px}.tabbtn.active{background:var(--blue);color:#071225}.tabpane{display:none}.tabpane.active{display:block}
+    .tablewrap{overflow:auto;max-height:520px;border:1px solid var(--line);border-radius:12px}.tablewrap table{min-width:760px}.tablewrap thead th{position:sticky;top:0;background:#121a2e;z-index:2}
+    .bot-table td{vertical-align:top}.bot-table .acts{min-width:108px}.mutedline{font-size:11px;color:var(--muted);margin-top:4px}
+    .quick-note{font-size:11px;color:var(--muted);margin-top:7px}
+    .compact-stats{grid-template-columns:repeat(3,minmax(120px,1fr))}
+    @media(max-width:1100px){.grid{grid-template-columns:360px 1fr}}
+
+    @media(max-width:850px){.wrap{padding:16px 10px 36px}.top{align-items:flex-start}.grid{grid-template-columns:1fr}.formgrid{grid-template-columns:1fr}.stats,.compact-stats{grid-template-columns:1fr}.techgrid{grid-template-columns:repeat(2,1fr)}.wide{grid-column:auto}.card{padding:16px}.badges{gap:6px}.badge{font-size:11px;padding:7px 9px}.tablewrap{max-height:440px}}
   </style>
 </head>
 <body>
@@ -55,7 +64,7 @@
 
   <div class="grid">
     <div class="card">
-      <h2>Add / Verify NSE Symbol</h2>
+      <h2>Create Bot</h2><div class="meta" style="margin:-10px 0 14px">1. Verify script &nbsp;→&nbsp; 2. Set strategy &nbsp;→&nbsp; 3. Add bot</div>
       <div class="row">
         <input id="symbol" placeholder="Type NSE code e.g. SBC, RELIANCE, TECHNOCRAF" autocomplete="off">
         <button class="primary" onclick="verifySymbol()">Verify</button>
@@ -80,17 +89,10 @@
         <div class="techwhy"><b>Suggestion:</b> <span id="techWhy">-</span></div>
       </div>
 
+      <div class="section-head"><h3>Basic Strategy</h3><span>Most-used settings</span></div>
       <div class="formgrid">
         <div class="field"><label>Timeframe</label><select id="timeframe"><option>1m</option><option>5m</option><option selected>15m</option></select></div>
         <div class="field"><label>Quantity per entry</label><input id="qty" type="number" value="1" min="1"></div>
-        <div class="field"><label>Entry RSI ≤ <span class="meta">(0 / blank = off)</span></label><input id="entryRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"><div class="meta">Test starting range: 35–40</div></div>
-        <div class="field"><label>Exit RSI ≥ <span class="meta">(0 / blank = off)</span></label><input id="exitRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"><div class="meta">Test starting range: 70–75</div></div>
-        <div class="field"><label>Entry Volume ≥ × 20m avg <span class="meta">(0 = off)</span></label><input id="entryVol" type="number" value="0" min="0" step="0.05" placeholder="0"><div class="meta">Test starting range: 1.0×–1.2×</div></div>
-        <div class="field"><label>Exit Volume ≥ × 20m avg <span class="meta">(0 = off)</span></label><input id="exitVol" type="number" value="0" min="0" step="0.05" placeholder="0"><div class="meta">Test starting range: 1.2×–1.5×</div></div>
-        <div class="wide notice" style="margin:-2px 0 2px">RSI / Volume conditions: <b>0 or blank = ignored.</b> Entry RSI means RSI must be ≤ the value; Exit RSI means RSI must be ≥ the value. Volume uses current 1-minute volume ÷ previous 20-minute average. PAPER bots can enforce these filters; LIVE bots store/show the conditions as technical guidance.</div>
-        <div class="field"><label>Qty random ± %</label><input id="qtyRandom" type="number" value="10" min="0" max="50" step="1"><div class="meta" id="qtyHint">Each order: 1 to 1</div></div>
-        <div class="field"><label>Max buys per batch <span title="0 = no batch limit (buy every slot)">(0 = off)</span></label><input id="batchSize" type="number" value="0" min="0" step="1"></div>
-        <div class="field"><label>Re-buy after drop % from last sell</label><input id="rebuyDip" type="number" value="1" min="0" max="50" step="0.05"></div>
         <div class="field"><label>Profit target %</label><input id="target" type="number" value="1.0" min="0.01" step="0.01"></div>
         <div class="field"><label>Max open positions</label><input id="maxpos" type="number" value="10" min="1"></div>
         <div class="field"><label>Max capital</label><input id="capital" type="number" value="100000" min="1"></div>
@@ -98,8 +100,24 @@
         <input type="hidden" id="mode" value="LIVE">
       </div>
 
-      <button class="start" style="width:100%" onclick="addBot()">Add Bot</button>
-      <div class="notice" style="margin-top:12px">Saving a bot does not send a trade. Start begins automatic trading. <b>Stop</b> blocks new BUYs but keeps selling open positions at their targets. <b>Exit &amp; Stop</b> sells this bot's open positions at market, then stops.</div>
+      <details class="advanced">
+        <summary>Advanced Conditions <span class="meta" style="margin-left:6px">RSI, Volume, Batch, Random Qty</span></summary>
+        <div class="inside">
+          <div class="formgrid">
+            <div class="field"><label>Entry RSI ≤ <span class="meta">(0 = off)</span></label><input id="entryRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"><div class="meta">Suggested test: 35–40</div></div>
+            <div class="field"><label>Exit RSI ≥ <span class="meta">(0 = off)</span></label><input id="exitRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"><div class="meta">Suggested test: 70–75</div></div>
+            <div class="field"><label>Entry Volume ≥ × 20m avg</label><input id="entryVol" type="number" value="0" min="0" step="0.05" placeholder="0"><div class="meta">Suggested test: 1.0×–1.2×</div></div>
+            <div class="field"><label>Exit Volume ≥ × 20m avg</label><input id="exitVol" type="number" value="0" min="0" step="0.05" placeholder="0"><div class="meta">Suggested test: 1.2×–1.5×</div></div>
+            <div class="field"><label>Qty random ± %</label><input id="qtyRandom" type="number" value="10" min="0" max="50" step="1"><div class="meta" id="qtyHint">Each order: 1 to 1</div></div>
+            <div class="field"><label>Max buys per batch <span class="meta">(0 = off)</span></label><input id="batchSize" type="number" value="0" min="0" step="1"></div>
+            <div class="field"><label>Re-buy after drop %</label><input id="rebuyDip" type="number" value="1" min="0" max="50" step="0.05"></div>
+          </div>
+          <div class="notice">0 / blank means the RSI or Volume condition is ignored. Volume = current 1-minute volume ÷ previous 20-minute average.</div>
+        </div>
+      </details>
+
+      <button class="start" style="width:100%" onclick="addBot()">Save Bot</button>
+      <div class="quick-note">Saving does not start the bot. Use <b>Start</b> from Active Bots when ready.</div>
     </div>
 
     <div class="card">
@@ -111,43 +129,57 @@
       </div>
       <h2 style="margin-top:8px">Active Bots</h2>
       <div style="overflow:auto">
-        <table>
-          <thead><tr><th>Bot</th><th>Mode</th><th>Qty / Target</th><th>Status</th><th>Open</th><th>Deployed</th><th>LTP</th><th>Last order</th><th></th></tr></thead>
-          <tbody id="bots"><tr id="emptyRow"><td colspan="9" class="empty">No bots added yet.</td></tr></tbody>
+        <div class="tablewrap">
+        <table class="bot-table">
+          <thead><tr><th>Bot</th><th>Strategy</th><th>Status</th><th>Position</th><th>Market</th><th>Actions</th></tr></thead>
+          <tbody id="bots"><tr id="emptyRow"><td colspan="6" class="empty">No bots added yet.</td></tr></tbody>
         </table>
+        </div>
       </div>
     </div>
   </div>
 
 <div class="card" style="margin-top:18px">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h2>Trading Reports <a href="/iifl/reports" style="font-size:13px;color:var(--blue);margin-left:8px">Full reports →</a></h2>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin-bottom:4px">Trading Activity</h2>
+      <div class="meta">Trades, broker orders and system activity in one place</div>
     </div>
-  <div class="stats">
+    <a href="/iifl/reports" class="badge info" style="text-decoration:none">Open Full Reports →</a>
+  </div>
+
+  <div class="stats compact-stats" style="margin-top:16px">
     <div class="stat"><b id="tradeCount">0</b><span>Total trades</span></div>
     <div class="stat"><b id="openTrades">0</b><span>Open trades</span></div>
     <div class="stat"><b id="realizedPnl">₹0.00</b><span>Realized P&amp;L</span></div>
   </div>
-  <div style="overflow:auto">
-    <table>
-      <thead><tr><th>Bot / Symbol</th><th>Status</th><th>Entry time</th><th>Entry fill</th><th>Qty</th><th>Target</th><th>Exit time</th><th>Exit / LTP</th><th>P&amp;L</th><th>Broker buy / sell</th></tr></thead>
-      <tbody id="tradeRows"><tr><td colspan="10" class="empty">No LIVE trades yet.</td></tr></tbody>
-    </table>
-  </div>
-</div>
 
-<div class="grid" style="margin-top:18px;grid-template-columns:1fr 1fr">
-  <div class="card">
-    <h2>LIVE Orders (broker)</h2>
-    <div style="overflow:auto;max-height:340px">
+  <div class="tabs">
+    <button class="tabbtn active" data-tab="tradesPane" onclick="showTab(this)">Trades</button>
+    <button class="tabbtn" data-tab="ordersPane" onclick="showTab(this)">Broker Orders</button>
+    <button class="tabbtn" data-tab="activityPane" onclick="showTab(this)">Activity &amp; Reconciliation</button>
+  </div>
+
+  <div id="tradesPane" class="tabpane active">
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Bot / Symbol</th><th>Status</th><th>Entry time</th><th>Entry fill</th><th>Qty</th><th>Target</th><th>Exit time</th><th>Exit / LTP</th><th>P&amp;L</th><th>Broker buy / sell</th></tr></thead>
+        <tbody id="tradeRows"><tr><td colspan="10" class="empty">No LIVE trades yet.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="ordersPane" class="tabpane">
+    <div class="tablewrap">
       <table>
         <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>State</th><th>Fill</th><th>Broker ID</th></tr></thead>
         <tbody id="orderRows"><tr><td colspan="7" class="empty">No LIVE orders yet.</td></tr></tbody>
       </table>
     </div>
   </div>
-  <div class="card">
-    <h2>Activity &amp; Reconciliation</h2>
-    <div id="recon" class="meta" style="margin-bottom:10px"></div>
+
+  <div id="activityPane" class="tabpane">
+    <div id="recon" class="notice" style="margin-bottom:12px"></div>
     <div id="events" class="events"><div class="meta">No events yet.</div></div>
   </div>
 </div>
@@ -330,7 +362,7 @@ async function exitBot(botId, symbol){
 
 function renderBots(){
   const tbody=document.getElementById('bots'); tbody.innerHTML='';
-  if(!bots.length){tbody.innerHTML='<tr><td colspan="9" class="empty">No bots added yet.</td></tr>'}
+  if(!bots.length){tbody.innerHTML='<tr><td colspan="6" class="empty">No bots added yet.</td></tr>'}
   let live=0, lots=0;
   bots.forEach(b=>{
     live+=Number(b.deployed_capital||0); lots+=Number(b.open_positions||0);
@@ -338,37 +370,39 @@ function renderBots(){
     const id=esc(b.bot_id), sym=esc(b.symbol);
     let btns='';
     if(b.status==='RUNNING'){
-      btns+='<button class="secondary btn-sm" onclick="stopBot(\''+id+'\')">Stop New Entries</button> ';
+      btns+='<button class="secondary btn-sm" onclick="stopBot(\''+id+'\')">Stop</button>';
     }else if(b.status!=='EXITING'){
-      btns+='<button class="start btn-sm" onclick="startBot(\''+id+'\')">Start</button> ';
+      btns+='<button class="start btn-sm" onclick="startBot(\''+id+'\')">Start</button>';
     }
+    btns+='<button class="secondary btn-sm" onclick="openEdit(\''+id+'\')">Edit</button>';
     if(b.open_positions>0 && b.status!=='EXITING'){
-      btns+='<button class="danger btn-sm" onclick="exitBot(\''+id+'\',\''+sym+'\')">Exit &amp; Stop</button> ';
+      btns+='<button class="danger btn-sm" onclick="exitBot(\''+id+'\',\''+sym+'\')">Exit</button>';
     }
-    btns+='<button class="secondary btn-sm" onclick="openEdit(\''+id+'\')">Edit</button> ';
     btns+='<button class="danger btn-sm" onclick="removeBot(\''+id+'\',\''+sym+'\')">Remove</button>';
-    const statusLabel = b.status==='STOPPED' && b.open_positions>0 ? 'STOPPED (managing exits)' : b.status;
-    const err = b.last_error ? '<div class="meta err">'+esc(b.last_error)+'</div>' : '';
-    const pend = b.pending_orders ? '<div class="meta">'+b.pending_orders+' order(s) pending at broker</div>' : '';
+
+    const statusLabel=b.status==='STOPPED'&&b.open_positions>0?'STOPPED • exits active':b.status;
+    const err=b.last_error?'<div class="mutedline err">'+esc(b.last_error)+'</div>':'';
+    const pend=b.pending_orders?'<div class="mutedline">'+b.pending_orders+' broker order(s) pending</div>':'';
     let batch='';
     if(Number(b.batch_size)>0){
-      if(b.batch_state==='BUYING') batch='Batch '+b.batch_no+': bought '+b.batch_bought+'/'+b.batch_size;
-      else if(b.batch_state==='WAITING_SELL') batch='Batch '+b.batch_no+' full ('+b.batch_size+'/'+b.batch_size+') • waiting for a sell';
-      else if(b.batch_state==='WAITING_DIP') batch='Waiting: re-buy at ≤ '+px(b.rebuy_trigger_price)+' ('+esc(b.rebuy_dip_pct)+'% below sell '+px(b.rebuy_ref_price)+')';
-      batch='<div class="meta" style="color:#b9d2ff">'+batch+'</div>';
+      if(b.batch_state==='BUYING') batch='Batch '+b.batch_no+': '+b.batch_bought+'/'+b.batch_size;
+      else if(b.batch_state==='WAITING_SELL') batch='Batch full • waiting for sell';
+      else if(b.batch_state==='WAITING_DIP') batch='Waiting re-buy ≤ '+px(b.rebuy_trigger_price);
+      if(batch) batch='<div class="mutedline">'+batch+'</div>';
     }
-    tr.innerHTML='<td><b>'+sym+'</b><div class="meta">'+esc(b.timeframe)+' • '+esc(b.product)+' • '+id+'</div></td>'+
-      '<td><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+esc(b.mode)+'</span></td>'+
-      '<td>'+esc(b.qty)+(Number(b.qty_random_pct)>0?' ±'+esc(b.qty_random_pct)+'%':'')+' / '+esc(b.target)+'%'+
-      '<div class="meta">RSI in '+(Number(b.entry_rsi_max)>0?'≤'+esc(b.entry_rsi_max):'off')+' • out '+(Number(b.exit_rsi_min)>0?'≥'+esc(b.exit_rsi_min):'off')+'</div>'+
-      '<div class="meta">Vol in '+(Number(b.entry_volume_min)>0?'≥'+esc(b.entry_volume_min)+'×':'off')+' • out '+(Number(b.exit_volume_min)>0?'≥'+esc(b.exit_volume_min)+'×':'off')+'</div>'+
-      '<div class="meta">max '+esc(b.maxpos)+' • cap ₹'+Number(b.capital).toLocaleString('en-IN')+'</div></td>'+
-      '<td style="min-width:190px"><span class="pill">'+esc(statusLabel || 'READY')+'</span>'+batch+pend+
-      '<div class="meta" style="color:#b9d2ff">Exit check: '+esc(b.exit_check || '-')+'</div>'+err+'</td>'+
-      '<td>'+esc(b.open_positions)+'<div class="meta">'+esc(b.open_qty)+' sh</div></td>'+
-      '<td>'+money(b.deployed_capital)+'</td>'+
-      '<td>'+px(b.last_ltp)+'<div class="meta">'+tm(b.last_tick)+'</div></td>'+
-      '<td style="min-width:120px;white-space:normal"><span class="meta">'+esc(b.last_order || '-')+'</span></td>'+
+
+    const filters=[];
+    if(Number(b.entry_rsi_max)>0) filters.push('RSI≤'+esc(b.entry_rsi_max));
+    if(Number(b.exit_rsi_min)>0) filters.push('Exit RSI≥'+esc(b.exit_rsi_min));
+    if(Number(b.entry_volume_min)>0) filters.push('Vol≥'+esc(b.entry_volume_min)+'×');
+    if(Number(b.exit_volume_min)>0) filters.push('Exit Vol≥'+esc(b.exit_volume_min)+'×');
+
+    tr.innerHTML=
+      '<td><b>'+sym+'</b><div class="mutedline">'+esc(b.timeframe)+' • '+esc(b.product)+' • '+id+'</div><div class="mutedline"><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+esc(b.mode)+'</span></div></td>'+
+      '<td><b>'+esc(b.qty)+' sh • '+esc(b.target)+'%</b><div class="mutedline">Max '+esc(b.maxpos)+' • Cap ₹'+Number(b.capital).toLocaleString('en-IN')+'</div>'+(filters.length?'<div class="mutedline">'+filters.join(' • ')+'</div>':'')+'</td>'+
+      '<td><span class="pill">'+esc(statusLabel||'READY')+'</span>'+batch+pend+'<div class="mutedline">Exit: '+esc(b.exit_check||'-')+'</div>'+err+'</td>'+
+      '<td><b>'+esc(b.open_positions)+' lots</b><div class="mutedline">'+esc(b.open_qty)+' shares</div><div class="mutedline">'+money(b.deployed_capital)+' deployed</div></td>'+
+      '<td><b>₹'+px(b.last_ltp)+'</b><div class="mutedline">'+tm(b.last_tick)+'</div><div class="mutedline">'+esc(b.last_order||'-')+'</div></td>'+
       '<td><div class="acts">'+btns+'</div></td>';
     tbody.appendChild(tr);
   });
@@ -485,6 +519,14 @@ async function saveEdit(){
     const d=await readJson(r); if(!r.ok) throw new Error(d.message||'Could not save');
     closeEdit(); await loadBots();
   }catch(e){st.textContent=e.message}
+}
+
+function showTab(btn){
+  document.querySelectorAll('.tabbtn').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tabpane').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  const pane=document.getElementById(btn.dataset.tab);
+  if(pane) pane.classList.add('active');
 }
 
 loadSystem();
