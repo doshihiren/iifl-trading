@@ -34,6 +34,7 @@ import broker as broker_mod
 import config
 import db
 import market_calendar as cal
+import indicator_conditions
 
 IST = ZoneInfo("Asia/Kolkata")
 log = logging.getLogger("iifl.engine")
@@ -375,6 +376,12 @@ class Engine:
             skip = self.live_block_reason(bot, qty)
             if not skip and self._mismatched(bot):
                 skip = "Broker quantity is lower than bot positions; new entries paused"
+        if not skip and mode == "PAPER" and indicator_conditions.enabled(bot):
+            try:
+                snap = indicator_conditions.snapshot(bot, now)
+                skip = indicator_conditions.entry_block_reason(bot, snap)
+            except Exception as exc:
+                skip = f"Entry indicator unavailable: {str(exc)[:120]}"
         if not skip:
             lots = db.rows("SELECT * FROM trades WHERE bot_id=? AND status IN ('OPEN','EXIT_SUBMITTED')", (bot_id,))
             if len(lots) >= int(bot["maxpos"]):
@@ -507,6 +514,15 @@ class Engine:
                 if nxt and now < nxt:
                     continue
             if ltp >= float(lot["target_price"]):
+                if bot["mode"] == "PAPER" and indicator_conditions.enabled(bot):
+                    try:
+                        snap = indicator_conditions.snapshot(bot, now)
+                        why = indicator_conditions.exit_block_reason(bot, snap)
+                    except Exception as exc:
+                        why = f"Exit indicator unavailable: {str(exc)[:120]}"
+                    if why:
+                        self._bot_error(bot["bot_id"], why)
+                        continue
                 reason = "TARGET"
             elif eod:
                 reason = "INTRADAY_SQUAREOFF"
