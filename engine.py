@@ -101,6 +101,18 @@ def current_slot(timeframe, now):
     return now.strftime("%Y-%m-%d") + f"T{hour:02d}:{minute:02d}"
 
 
+def paper_entry_second(bot_id, slot):
+    """Stable per-bot/per-slot jitter so PAPER entries do not always fire at the same second.
+
+    Uses a deterministic hash rather than process randomness so a worker restart
+    during the same candle does not change the planned second.
+    Range 7..52 avoids both the candle open and the very end of the minute.
+    """
+    raw = f"{bot_id}|{slot}|ENTRY_SECOND".encode()
+    n = int(hashlib.sha256(raw).hexdigest()[:8], 16)
+    return 7 + (n % 46)
+
+
 def _parse_ts(value):
     if not value:
         return None
@@ -361,6 +373,14 @@ class Engine:
             return
 
         mode = bot["mode"]
+
+        # PAPER timing jitter: wait until a different second inside each candle.
+        # This changes only timing; signal/strategy conditions remain unchanged.
+        if mode == "PAPER":
+            due_second = paper_entry_second(bot_id, slot)
+            if now.second < due_second:
+                return
+
         base_qty = int(bot["qty"])
         qty = randomized_qty(base_qty, bot.get("qty_random_pct", 10))
         signal_key = f"{bot_id}|{slot}|BUY"
