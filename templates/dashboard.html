@@ -83,10 +83,10 @@
       <div class="formgrid">
         <div class="field"><label>Timeframe</label><select id="timeframe"><option>1m</option><option>5m</option><option selected>15m</option></select></div>
         <div class="field"><label>Quantity per entry</label><input id="qty" type="number" value="1" min="1"></div>
-        <div class="field"><label>Entry RSI ≤ <span class="meta">(0 / blank = off)</span></label><input id="entryRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"></div>
-        <div class="field"><label>Exit RSI ≥ <span class="meta">(0 / blank = off)</span></label><input id="exitRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"></div>
-        <div class="field"><label>Entry Volume ≥ × 20m avg <span class="meta">(0 = off)</span></label><input id="entryVol" type="number" value="0" min="0" step="0.05" placeholder="0"></div>
-        <div class="field"><label>Exit Volume ≥ × 20m avg <span class="meta">(0 = off)</span></label><input id="exitVol" type="number" value="0" min="0" step="0.05" placeholder="0"></div>
+        <div class="field"><label>Entry RSI ≤ <span class="meta">(0 / blank = off)</span></label><input id="entryRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"><div class="meta">Test starting range: 35–40</div></div>
+        <div class="field"><label>Exit RSI ≥ <span class="meta">(0 / blank = off)</span></label><input id="exitRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"><div class="meta">Test starting range: 70–75</div></div>
+        <div class="field"><label>Entry Volume ≥ × 20m avg <span class="meta">(0 = off)</span></label><input id="entryVol" type="number" value="0" min="0" step="0.05" placeholder="0"><div class="meta">Test starting range: 1.0×–1.2×</div></div>
+        <div class="field"><label>Exit Volume ≥ × 20m avg <span class="meta">(0 = off)</span></label><input id="exitVol" type="number" value="0" min="0" step="0.05" placeholder="0"><div class="meta">Test starting range: 1.2×–1.5×</div></div>
         <div class="wide notice" style="margin:-2px 0 2px">RSI / Volume conditions: <b>0 or blank = ignored.</b> Entry RSI means RSI must be ≤ the value; Exit RSI means RSI must be ≥ the value. Volume uses current 1-minute volume ÷ previous 20-minute average. PAPER bots can enforce these filters; LIVE bots store/show the conditions as technical guidance.</div>
         <div class="field"><label>Qty random ± %</label><input id="qtyRandom" type="number" value="10" min="0" max="50" step="1"><div class="meta" id="qtyHint">Each order: 1 to 1</div></div>
         <div class="field"><label>Max buys per batch <span title="0 = no batch limit (buy every slot)">(0 = off)</span></label><input id="batchSize" type="number" value="0" min="0" step="1"></div>
