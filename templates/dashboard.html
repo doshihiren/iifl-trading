@@ -83,6 +83,10 @@
       <div class="formgrid">
         <div class="field"><label>Timeframe</label><select id="timeframe"><option>1m</option><option>5m</option><option selected>15m</option></select></div>
         <div class="field"><label>Quantity per entry</label><input id="qty" type="number" value="1" min="1"></div>
+        <div class="field"><label>Entry RSI ≤ <span class="meta">(0 / blank = off)</span></label><input id="entryRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"></div>
+        <div class="field"><label>Exit RSI ≥ <span class="meta">(0 / blank = off)</span></label><input id="exitRsi" type="number" value="0" min="0" max="100" step="0.1" placeholder="0"></div>
+        <div class="field"><label>Entry Volume ≥ × 20m avg <span class="meta">(0 = off)</span></label><input id="entryVol" type="number" value="0" min="0" step="0.05" placeholder="0"></div>
+        <div class="field"><label>Exit Volume ≥ × 20m avg <span class="meta">(0 = off)</span></label><input id="exitVol" type="number" value="0" min="0" step="0.05" placeholder="0"></div>
         <div class="field"><label>Qty random ± %</label><input id="qtyRandom" type="number" value="10" min="0" max="50" step="1"><div class="meta" id="qtyHint">Each order: 1 to 1</div></div>
         <div class="field"><label>Max buys per batch <span title="0 = no batch limit (buy every slot)">(0 = off)</span></label><input id="batchSize" type="number" value="0" min="0" step="1"></div>
         <div class="field"><label>Re-buy after drop % from last sell</label><input id="rebuyDip" type="number" value="1" min="0" max="50" step="0.05"></div>
@@ -243,6 +247,10 @@ async function addBot(){
     mode:document.getElementById('mode').value,
     qty:Number(document.getElementById('qty').value),
     qty_random_pct:Number(document.getElementById('qtyRandom').value),
+    entry_rsi_max:Number(document.getElementById('entryRsi').value || 0),
+    exit_rsi_min:Number(document.getElementById('exitRsi').value || 0),
+    entry_volume_min:Number(document.getElementById('entryVol').value || 0),
+    exit_volume_min:Number(document.getElementById('exitVol').value || 0),
     batch_size:Number(document.getElementById('batchSize').value),
     rebuy_dip_pct:Number(document.getElementById('rebuyDip').value),
     target:Number(document.getElementById('target').value),
@@ -350,7 +358,10 @@ function renderBots(){
     }
     tr.innerHTML='<td><b>'+sym+'</b><div class="meta">'+esc(b.timeframe)+' • '+esc(b.product)+' • '+id+'</div></td>'+
       '<td><span class="pill '+(b.mode==='PAPER'?'paper':'')+'">'+esc(b.mode)+'</span></td>'+
-      '<td>'+esc(b.qty)+(Number(b.qty_random_pct)>0?' ±'+esc(b.qty_random_pct)+'%':'')+' / '+esc(b.target)+'%<div class="meta">max '+esc(b.maxpos)+' • cap ₹'+Number(b.capital).toLocaleString('en-IN')+'</div></td>'+
+      '<td>'+esc(b.qty)+(Number(b.qty_random_pct)>0?' ±'+esc(b.qty_random_pct)+'%':'')+' / '+esc(b.target)+'%'+
+      '<div class="meta">RSI in '+(Number(b.entry_rsi_max)>0?'≤'+esc(b.entry_rsi_max):'off')+' • out '+(Number(b.exit_rsi_min)>0?'≥'+esc(b.exit_rsi_min):'off')+'</div>'+
+      '<div class="meta">Vol in '+(Number(b.entry_volume_min)>0?'≥'+esc(b.entry_volume_min)+'×':'off')+' • out '+(Number(b.exit_volume_min)>0?'≥'+esc(b.exit_volume_min)+'×':'off')+'</div>'+
+      '<div class="meta">max '+esc(b.maxpos)+' • cap ₹'+Number(b.capital).toLocaleString('en-IN')+'</div></td>'+
       '<td style="min-width:170px"><span class="pill">'+esc(statusLabel || 'READY')+'</span>'+batch+pend+err+'</td>'+
       '<td>'+esc(b.open_positions)+'<div class="meta">'+esc(b.open_qty)+' sh</div></td>'+
       '<td>'+money(b.deployed_capital)+'</td>'+
@@ -449,7 +460,10 @@ document.getElementById('qtyRandom').addEventListener('input',updateQtyHint);
 updateQtyHint();
 
 // ---------- edit bot ----------
-const EDIT_FIELDS=[['qty','Quantity per entry',1,1],['qty_random_pct','Qty random ± %',0,0.5],['target','Profit target %',0.01,0.01],
+const EDIT_FIELDS=[['qty','Quantity per entry',1,1],['qty_random_pct','Qty random ± %',0,0.5],
+  ['entry_rsi_max','Entry RSI ≤ (0 = off)',0,0.1],['exit_rsi_min','Exit RSI ≥ (0 = off)',0,0.1],
+  ['entry_volume_min','Entry Volume ≥ × 20m avg (0 = off)',0,0.05],['exit_volume_min','Exit Volume ≥ × 20m avg (0 = off)',0,0.05],
+  ['target','Profit target %',0.01,0.01],
   ['maxpos','Max open positions',1,1],['capital','Max capital',1,1],['batch_size','Max buys per batch (0 = off)',0,1],['rebuy_dip_pct','Re-buy after drop % from last sell',0,0.05]];
 function openEdit(id){
   const b=bots.find(x=>x.bot_id===id); if(!b) return;
