@@ -290,7 +290,12 @@ def normalize_trade_row(r):
 
 
 def broker_quantity(instrument_id, trading_symbol, product, positions_rows, holdings_rows):
-    """Shares the broker says we can sell for this instrument and product."""
+    """Return the broker-reported quantity currently usable for sell checks.
+
+    DELIVERY is governed by holdings/BTST availability at IIFL. Do not add the
+    day's net DELIVERY position to holdings, because RMS can already reflect
+    those shares in the holding/BTST availability and the sum can be wrong.
+    """
     iid = str(instrument_id)
     syms = {s.upper() for s in (trading_symbol or "",) if s}
     if trading_symbol and trading_symbol.upper().endswith("-EQ"):
@@ -300,6 +305,26 @@ def broker_quantity(instrument_id, trading_symbol, product, positions_rows, hold
         ids = {str(r.get(k) or "") for k in ("instrumentId", "nseInstrumentId", "token")}
         names = {str(r.get(k) or "").upper() for k in ("tradingSymbol", "nseTradingSymbol", "symbol")}
         return iid in ids or bool(syms & names)
+
+    if product == "DELIVERY":
+        qty = 0
+        for r in holdings_rows:
+            if not matches(r):
+                continue
+            row_product = str(r.get("product") or "DELIVERY").upper()
+            if row_product != "DELIVERY":
+                continue
+            available = r.get("authorizedQuantity")
+            if available in (None, ""):
+                available = r.get("totalQuantity", r.get("quantity"))
+            qty += max(0, int(_num(available)))
+        return qty
+
+    qty = 0
+    for r in positions_rows:
+        if matches(r) and str(r.get("product") or "").upper() == product:
+            qty += int(_num(r.get("netQuantity", r.get("quantity"))))
+    return max(0, qty)
 
     qty = 0
     for r in positions_rows:
