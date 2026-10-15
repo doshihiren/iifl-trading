@@ -547,6 +547,35 @@ def _bot_summary(bot):
     bot["open_qty"] = sum(int(l["quantity"]) for l in lots)
     bot["deployed_capital"] = round(sum(float(l["entry_price"]) * int(l["quantity"]) for l in lots), 2)
     bot["pending_orders"] = int(pending or 0)
+
+    # Read-only exit diagnostics for the dashboard. This never submits an order.
+    open_lots = db.rows(
+        "SELECT id, status, target_price, next_exit_at, exit_order_id FROM trades "
+        "WHERE bot_id=? AND status IN ('OPEN','EXIT_SUBMITTED') ORDER BY id",
+        (bot["bot_id"],))
+    ltp = float(bot["last_ltp"]) if bot.get("last_ltp") not in (None, "") else None
+    target_matched = [t for t in open_lots if t["status"] == "OPEN" and ltp is not None
+                      and ltp >= float(t["target_price"])]
+    sell_pending = int(db.scalar(
+        f"SELECT COUNT(*) FROM orders WHERE bot_id=? AND side='SELL' "
+        f"AND state IN ({','.join('?'*len(ACTIVE_ORDER_STATES))})",
+        (bot["bot_id"], *ACTIVE_ORDER_STATES)) or 0)
+    if not open_lots:
+        exit_check = "No open positions"
+    elif sell_pending:
+        exit_check = f"{sell_pending} SELL order(s) pending at broker"
+    elif target_matched:
+        exit_check = f"{len(target_matched)} target(s) matched"
+        if bot.get("last_error"):
+            exit_check += f" • {bot['last_error']}"
+    else:
+        exit_check = "Waiting for target"
+        if bot.get("last_error") and ("Exit" in str(bot["last_error"]) or "sell" in str(bot["last_error"]).lower()):
+            exit_check += f" • {bot['last_error']}"
+    bot["exit_check"] = exit_check
+    bot["targets_matched"] = len(target_matched)
+    bot["sell_orders_pending"] = sell_pending
+
     bot["batch_bought"] = int(db.scalar(
         "SELECT COUNT(*) FROM orders WHERE bot_id=? AND side='BUY' AND batch_no=? "
         "AND state IN ('FILLED',?,?,?,?)",
