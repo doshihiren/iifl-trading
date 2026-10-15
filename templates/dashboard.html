@@ -363,7 +363,8 @@ function renderBots(){
       '<div class="meta">RSI in '+(Number(b.entry_rsi_max)>0?'≤'+esc(b.entry_rsi_max):'off')+' • out '+(Number(b.exit_rsi_min)>0?'≥'+esc(b.exit_rsi_min):'off')+'</div>'+
       '<div class="meta">Vol in '+(Number(b.entry_volume_min)>0?'≥'+esc(b.entry_volume_min)+'×':'off')+' • out '+(Number(b.exit_volume_min)>0?'≥'+esc(b.exit_volume_min)+'×':'off')+'</div>'+
       '<div class="meta">max '+esc(b.maxpos)+' • cap ₹'+Number(b.capital).toLocaleString('en-IN')+'</div></td>'+
-      '<td style="min-width:170px"><span class="pill">'+esc(statusLabel || 'READY')+'</span>'+batch+pend+err+'</td>'+
+      '<td style="min-width:190px"><span class="pill">'+esc(statusLabel || 'READY')+'</span>'+batch+pend+
+      '<div class="meta" style="color:#b9d2ff">Exit check: '+esc(b.exit_check || '-')+'</div>'+err+'</td>'+
       '<td>'+esc(b.open_positions)+'<div class="meta">'+esc(b.open_qty)+' sh</div></td>'+
       '<td>'+money(b.deployed_capital)+'</td>'+
       '<td>'+px(b.last_ltp)+'<div class="meta">'+tm(b.last_tick)+'</div></td>'+
