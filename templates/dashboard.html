@@ -30,7 +30,10 @@
     table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:11px 8px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600}
     .pill{padding:5px 8px;border-radius:999px;font-size:11px;font-weight:800;background:#183527;color:#8af0b6}.pill.paper{background:#2f2945;color:#cabdff}
     .empty{color:var(--muted);padding:24px 4px;text-align:center}.status{min-height:20px;margin-top:9px;font-size:13px;color:var(--muted)}
-    @media(max-width:850px){.grid{grid-template-columns:1fr}.formgrid{grid-template-columns:1fr}.stats{grid-template-columns:1fr}.wide{grid-column:auto}}
+    .techbox{display:none;margin-top:14px;background:#0d1528;border:1px solid var(--line);border-radius:14px;padding:14px}.techbox.show{display:block}
+    .techgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.techitem{background:#10192b;border:1px solid #263450;border-radius:12px;padding:12px}.techitem b{display:block;font-size:20px;margin-top:4px}.techitem span{font-size:11px;color:var(--muted)}
+    .techwhy{margin-top:10px;font-size:12px;color:#aeb9d1;line-height:1.5}.signal-buy{color:var(--green)}.signal-sell{color:var(--red)}.signal-hold{color:var(--amber)}
+    @media(max-width:850px){.grid{grid-template-columns:1fr}.formgrid{grid-template-columns:1fr}.stats{grid-template-columns:1fr}.techgrid{grid-template-columns:repeat(2,1fr)}.wide{grid-column:auto}}
   </style>
 </head>
 <body>
@@ -63,6 +66,18 @@
         <div class="sym" id="vname">-</div>
         <div class="meta" id="vmeta">-</div>
         <div class="ltp" id="vltp">₹--</div>
+      </div>
+
+      <div id="techBox" class="techbox">
+        <div class="techgrid">
+          <div class="techitem"><span>Current RSI</span><b id="techRsi">-</b><div class="meta" id="techRsiTrend">-</div></div>
+          <div class="techitem"><span>Current Volume</span><b id="techVol">-</b><div class="meta" id="techVolAvg">-</div></div>
+          <div class="techitem"><span>Volume vs 20m Avg</span><b id="techVolRatio">-</b><div class="meta">latest 1m candle</div></div>
+          <div class="techitem"><span>Technical Signal</span><b id="techSignal" class="signal-hold">HOLD</b><div class="meta">RSI + volume</div></div>
+        </div>
+        <div class="techwhy"><b>RSI:</b> <span id="techRsiText">-</span></div>
+        <div class="techwhy"><b>Volume:</b> <span id="techVolText">-</span></div>
+        <div class="techwhy"><b>Suggestion:</b> <span id="techWhy">-</span></div>
       </div>
 
       <div class="formgrid">
@@ -168,7 +183,44 @@ async function verifySymbol(){
     document.getElementById('vltp').textContent='₹'+Number(q.ltp).toFixed(2);
     box.classList.add('show');
     status.textContent='Verified successfully.';
+    loadTechnical(symbol);
   }catch(e){status.textContent=e.message || 'Verification failed.'}
+}
+
+let techTimer=null;
+function fmtVol(v){return v==null?'-':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0})}
+async function loadTechnical(symbol){
+  clearTimeout(techTimer);
+  const box=document.getElementById('techBox');
+  box.classList.add('show');
+  document.getElementById('techRsi').textContent='…';
+  document.getElementById('techVol').textContent='…';
+  document.getElementById('techVolRatio').textContent='…';
+  document.getElementById('techSignal').textContent='CHECKING';
+  try{
+    const r=await fetch('/iifl/api/technical-now?symbol='+encodeURIComponent(symbol));
+    const data=await readJson(r);
+    if(!r.ok) throw new Error(data.message || 'Technical data unavailable');
+    const t=data.result||{};
+    document.getElementById('techRsi').textContent=t.rsi ?? '-';
+    document.getElementById('techRsiTrend').textContent=(t.rsi_trend || '-')+(t.rsi_prev!=null?' • was '+t.rsi_prev:'');
+    document.getElementById('techVol').textContent=fmtVol(t.volume);
+    document.getElementById('techVolAvg').textContent=t.volume_avg20!=null?'20m avg '+fmtVol(t.volume_avg20):'20m avg unavailable';
+    document.getElementById('techVolRatio').textContent=t.volume_ratio!=null?Number(t.volume_ratio).toFixed(2)+'×':'-';
+    const s=document.getElementById('techSignal');
+    s.textContent=t.signal || 'HOLD';
+    s.className=t.signal==='BUY'?'signal-buy':(t.signal==='SELL'?'signal-sell':'signal-hold');
+    document.getElementById('techRsiText').textContent=t.rsi_text || '-';
+    document.getElementById('techVolText').textContent=t.volume_text || '-';
+    document.getElementById('techWhy').textContent=t.signal_reason || '-';
+  }catch(e){
+    document.getElementById('techRsi').textContent='-';
+    document.getElementById('techVol').textContent='-';
+    document.getElementById('techVolRatio').textContent='-';
+    const s=document.getElementById('techSignal');s.textContent='UNAVAILABLE';s.className='signal-hold';
+    document.getElementById('techWhy').textContent=e.message || 'Technical data unavailable';
+  }
+  techTimer=setTimeout(()=>{if(verified && verified.symbol===symbol) loadTechnical(symbol)},60000);
 }
 
 async function loadBots(){
