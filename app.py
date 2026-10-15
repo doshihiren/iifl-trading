@@ -1023,6 +1023,10 @@ app.register_blueprint(rsi_analysis.bp)
 import rsi_volume_analysis  # noqa: E402
 app.register_blueprint(rsi_volume_analysis.bp)
 
+# ---- Main dashboard RSI + Volume technical summary ----
+import technical_summary  # noqa: E402
+app.register_blueprint(technical_summary.bp)
+
 # ---- Strategy Lab (separate page; Analysis and RSI Analysis are unchanged) ----
 import strategy_lab  # noqa: E402
 app.register_blueprint(strategy_lab.bp)
