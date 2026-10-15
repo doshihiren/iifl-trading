@@ -568,6 +568,32 @@ def _batch_settings(body):
     return size, dip
 
 
+def _indicator_settings(body):
+    """0/blank disables a condition. RSI is 0..100; volume values are min x average."""
+    def num(name):
+        raw = body.get(name, 0)
+        if raw in (None, ""):
+            return 0.0
+        return float(raw)
+
+    try:
+        entry_rsi = num("entry_rsi_max")
+        exit_rsi = num("exit_rsi_min")
+        entry_vol = num("entry_volume_min")
+        exit_vol = num("exit_volume_min")
+    except (TypeError, ValueError):
+        raise ValueError("Invalid RSI / Volume settings")
+
+    for name, value in (("Entry RSI", entry_rsi), ("Exit RSI", exit_rsi)):
+        if value < 0 or value > 100:
+            raise ValueError(f"{name} must be 0 to 100")
+    for name, value in (("Entry Volume", entry_vol), ("Exit Volume", exit_vol)):
+        if value < 0:
+            raise ValueError(f"{name} cannot be negative")
+
+    return entry_rsi, exit_rsi, entry_vol, exit_vol
+
+
 @app.route("/iifl/api/bots", methods=["GET"])
 def api_bots_list():
     return jsonify({
@@ -620,6 +646,7 @@ def api_bots_save():
         return jsonify({"status": "error", "message": "Qty random % must be between 0 and 50"}), 400
     try:
         batch_size, rebuy_dip_pct = _batch_settings(body)
+        entry_rsi_max, exit_rsi_min, entry_volume_min, exit_volume_min = _indicator_settings(body)
     except ValueError as e:
         return jsonify({"status": "error", "message": str(e)}), 400
 
@@ -632,6 +659,10 @@ def api_bots_save():
         "mode": mode,
         "qty": quantity,
         "qty_random_pct": qty_random_pct,
+        "entry_rsi_max": entry_rsi_max,
+        "exit_rsi_min": exit_rsi_min,
+        "entry_volume_min": entry_volume_min,
+        "exit_volume_min": exit_volume_min,
         "batch_size": batch_size,
         "rebuy_dip_pct": rebuy_dip_pct,
         "target": target,
@@ -681,6 +712,8 @@ def api_bots_edit(bot_id):
     changes = {}
     try:
         for key, cast, lo, hi in (("qty", int, 1, None), ("qty_random_pct", float, 0, 50),
+                                  ("entry_rsi_max", float, 0, 100), ("exit_rsi_min", float, 0, 100),
+                                  ("entry_volume_min", float, 0, None), ("exit_volume_min", float, 0, None),
                                   ("target", float, 0.01, None), ("maxpos", int, 1, None),
                                   ("capital", float, 1, None)):
             if key in body and body[key] not in (None, ""):
