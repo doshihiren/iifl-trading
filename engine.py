@@ -400,11 +400,31 @@ class Engine:
                 try:
                     snap = indicator_conditions.snapshot(bot, now)
                     indicator_skip = indicator_conditions.entry_block_reason(bot, snap)
+                    ready_key = f"entry_ready:{bot_id}"
                     if indicator_skip:
+                        db.set_runtime(ready_key, {
+                            "ready": False, "slot": slot, "reason": indicator_skip,
+                            "generated_at": db.now_utc()
+                        })
                         skip = indicator_skip
                     else:
-                        skip = "LIVE entry READY: RSI/Volume conditions matched; confirmation required"
+                        db.set_runtime(ready_key, {
+                            "ready": True,
+                            "bot_id": bot_id,
+                            "slot": slot,
+                            "qty": qty,
+                            "ltp": ltp,
+                            "rsi": snap.get("rsi"),
+                            "volume_ratio": snap.get("volume_ratio"),
+                            "generated_at": db.now_utc()
+                        })
+                        skip = "LIVE entry READY: RSI/Volume conditions matched; confirm BUY on dashboard"
                 except Exception as exc:
+                    db.set_runtime(f"entry_ready:{bot_id}", {
+                        "ready": False, "slot": slot,
+                        "reason": f"Indicator unavailable: {str(exc)[:120]}",
+                        "generated_at": db.now_utc()
+                    })
                     skip = f"Entry indicator unavailable: {str(exc)[:120]}"
         if not skip and mode == "PAPER" and indicator_conditions.enabled(bot):
             try:
