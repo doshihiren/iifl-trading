@@ -381,7 +381,8 @@ function renderBots(){
     btns+='<button class="danger btn-sm" onclick="removeBot(\''+id+'\',\''+sym+'\')">Remove</button>';
 
     const statusLabel=b.status==='STOPPED'&&b.open_positions>0?'STOPPED • exits active':b.status;
-    const err=b.last_error?'<div class="mutedline err">'+esc(b.last_error)+'</div>':'';
+    const ready=String(b.last_error||'').startsWith('LIVE entry READY:');
+    const err=b.last_error?'<div class="mutedline '+(ready?'ok':'err')+'">'+esc(b.last_error)+'</div>':'';
     const pend=b.pending_orders?'<div class="mutedline">'+b.pending_orders+' broker order(s) pending</div>':'';
     let batch='';
     if(Number(b.batch_size)>0){
