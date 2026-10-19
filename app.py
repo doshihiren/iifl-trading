@@ -792,6 +792,115 @@ def api_bot_start(bot_id):
     return jsonify({"status": "Ok", "result": bot})
 
 
+@app.route("/iifl/api/bots/<bot_id>/confirm-entry", methods=["POST"])
+def api_bot_confirm_entry(bot_id):
+    """Explicitly confirm one fresh LIVE BUY signal from the dashboard."""
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") != "BUY":
+        return jsonify({"status": "error", "message": "Explicit BUY confirmation required"}), 400
+
+    bot = get_bot(bot_id)
+    if not bot:
+        return jsonify({"status": "error", "message": "Bot not found"}), 404
+    if bot["mode"] != "LIVE":
+        return jsonify({"status": "error", "message": "Confirmation is only for LIVE bots"}), 400
+    if bot["status"] != "RUNNING":
+        return jsonify({"status": "error", "message": "Bot is not running"}), 409
+    if market_calendar.market_status(datetime.now(IST)) != "OPEN":
+        return jsonify({"status": "error", "message": "Market is not open"}), 409
+
+    ready = db.get_runtime(f"entry_ready:{bot_id}") or {}
+    if not ready.get("ready"):
+        return jsonify({"status": "error", "message": ready.get("reason") or "No matched entry signal is ready"}), 409
+
+    age = _age_seconds(ready.get("generated_at"))
+    if age is None or age > 90:
+        return jsonify({"status": "error", "message": "Entry signal is stale. Wait for the next fresh signal."}), 409
+
+    try:
+        import broker
+        import indicator_conditions
+        from engine import Engine, ACTIVE_ORDER_STATES
+
+        broker.check_session()
+
+        snap = indicator_conditions.snapshot(bot, datetime.now(IST))
+        why = indicator_conditions.entry_block_reason(bot, snap)
+        if why:
+            db.set_runtime(f"entry_ready:{bot_id}", {
+                "ready": False, "reason": why, "generated_at": db.now_utc()
+            })
+            return jsonify({"status": "error", "message": why}), 409
+
+        eng = Engine()
+        eng.session_ok = True
+
+        pending = db.scalar(
+            f"SELECT COUNT(*) FROM orders WHERE bot_id=? AND side='BUY' "
+            f"AND state IN ({','.join('?'*len(ACTIVE_ORDER_STATES))})",
+            (bot_id, *ACTIVE_ORDER_STATES)
+        ) or 0
+        if pending:
+            return jsonify({"status": "error", "message": "Previous BUY order is still pending"}), 409
+
+        qty = int(ready.get("qty") or bot["qty"])
+        quote = eng.quotes([(str(bot["instrumentId"]), bot["exchange"])]).get(str(bot["instrumentId"]))
+        if not quote or quote[0] is None:
+            return jsonify({"status": "error", "message": "Fresh market price unavailable"}), 409
+        ltp = float(quote[0])
+
+        lots = db.rows(
+            "SELECT quantity, entry_price FROM trades WHERE bot_id=? AND status IN ('OPEN','EXIT_SUBMITTED')",
+            (bot_id,)
+        )
+        if len(lots) >= int(bot["maxpos"]):
+            return jsonify({"status": "error", "message": "Max open positions reached"}), 409
+        estimate = ltp * qty
+        bot_capital = sum(float(t["entry_price"]) * int(t["quantity"]) for t in lots)
+        if bot_capital + estimate > float(bot["capital"]):
+            return jsonify({"status": "error", "message": "Bot capital limit reached"}), 409
+        if eng.deployed_capital("LIVE") + estimate > config.GLOBAL_MAX_CAPITAL:
+            return jsonify({"status": "error", "message": "Global capital limit reached"}), 409
+
+        slot = str(ready.get("slot") or "")
+        signal_key = f"{bot_id}|{slot}|BUY"
+        order_key = f"CONFIRM|{bot_id}|{slot}"
+
+        with db.tx() as c:
+            exists = c.execute("SELECT id FROM orders WHERE order_key=?", (order_key,)).fetchone()
+            if exists:
+                return jsonify({"status": "error", "message": "This signal was already confirmed"}), 409
+            order_id = eng._insert_order(
+                c, order_key=order_key, bot=bot, side="BUY", qty=qty, ref=ltp,
+                signal_key=signal_key, lot_id=None, state="SUBMITTING"
+            )
+            c.execute(
+                "UPDATE strategy_signals SET decision='CONFIRMED', detail=? WHERE signal_key=?",
+                ("Confirmed from dashboard", signal_key)
+            )
+            c.execute(
+                "UPDATE bots SET last_error=NULL, updated_at=? WHERE bot_id=?",
+                (db.now_utc(), bot_id)
+            )
+
+        db.set_runtime(f"entry_ready:{bot_id}", {
+            "ready": False, "reason": "Confirmed", "generated_at": db.now_utc()
+        })
+        db.add_event("ENTRY_CONFIRMED", f"LIVE BUY confirmed for {bot['symbol']} qty {qty}",
+                     bot_id=bot_id, data={"slot": slot, "ltp": ltp, "rsi": snap.get("rsi")})
+        eng._send(order_id)
+
+        order = db.row(
+            "SELECT id, state, broker_order_id, reject_reason FROM orders WHERE id=?",
+            (order_id,)
+        )
+        return jsonify({"status": "Ok", "result": order})
+    except broker.SessionExpired as exc:
+        return jsonify({"status": "error", "message": f"IIFL session expired: {exc}"}), 409
+    except Exception as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
 @app.route("/iifl/api/bots/<bot_id>/stop", methods=["POST"])
 def api_bot_stop(bot_id):
     """STOP_NEW_ENTRIES: no new BUYs; open positions keep being sold at target."""
