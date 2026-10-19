@@ -50,6 +50,10 @@ DATA_DIR = os.path.dirname(BOT_DB_FILE)
 # in the IIFL order book after a crash. Set false if IIFL rejects the field.
 SEND_ORDER_TAG = env_bool("SEND_ORDER_TAG", True)
 
+# LIVE bots with RSI / volume conditions buy AUTOMATICALLY when the conditions
+# match. Set true to go back to the manual "Confirm BUY" button instead.
+LIVE_ENTRY_REQUIRE_CONFIRM = env_bool("LIVE_ENTRY_REQUIRE_CONFIRM", False)
+
 # ---- Market timing (IST) ------------------------------------------------
 MARKET_OPEN = os.getenv("MARKET_OPEN", "09:15")
 MARKET_CLOSE = os.getenv("MARKET_CLOSE", "15:30")

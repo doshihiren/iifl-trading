@@ -289,13 +289,7 @@ def normalize_trade_row(r):
     }
 
 
-def broker_quantity(instrument_id, trading_symbol, product, positions_rows, holdings_rows):
-    """Return the broker-reported quantity currently usable for sell checks.
-
-    DELIVERY is governed by holdings/BTST availability at IIFL. Do not add the
-    day's net DELIVERY position to holdings, because RMS can already reflect
-    those shares in the holding/BTST availability and the sum can be wrong.
-    """
+def _match_fn(instrument_id, trading_symbol):
     iid = str(instrument_id)
     syms = {s.upper() for s in (trading_symbol or "",) if s}
     if trading_symbol and trading_symbol.upper().endswith("-EQ"):
@@ -305,33 +299,55 @@ def broker_quantity(instrument_id, trading_symbol, product, positions_rows, hold
         ids = {str(r.get(k) or "") for k in ("instrumentId", "nseInstrumentId", "token")}
         names = {str(r.get(k) or "").upper() for k in ("tradingSymbol", "nseTradingSymbol", "symbol")}
         return iid in ids or bool(syms & names)
+    return matches
 
+
+def _delivery_holdings(matches, holdings_rows):
+    """(total, sellable) DELIVERY shares in IIFL holdings for one instrument."""
+    total = sellable = 0
+    for r in holdings_rows:
+        if not matches(r):
+            continue
+        if str(r.get("product") or "DELIVERY").upper() != "DELIVERY":
+            continue
+        tot = max(0, int(_num(r.get("totalQuantity", r.get("quantity")))))
+        auth = r.get("authorizedQuantity")
+        # authorizedQuantity of 0/blank does not mean "nothing can be sold" (accounts with
+        # DDPI/POA never authorise): fall back to the total in that case.
+        avail = int(_num(auth)) if auth not in (None, "") and int(_num(auth)) > 0 else tot
+        total += tot
+        sellable += max(0, avail)
+    return total, sellable
+
+
+def _positions_net(matches, positions_rows, product):
+    return sum(int(_num(r.get("netQuantity", r.get("quantity"))))
+               for r in positions_rows if matches(r) and str(r.get("product") or "").upper() == product)
+
+
+def broker_quantity(instrument_id, trading_symbol, product, positions_rows, holdings_rows):
+    """SELLABLE quantity used before placing a LIVE sell.
+
+    DELIVERY uses IIFL holdings / BTST availability only (the day's net DELIVERY
+    position is not added, because RMS can already reflect it in holdings).
+    """
+    matches = _match_fn(instrument_id, trading_symbol)
     if product == "DELIVERY":
-        qty = 0
-        for r in holdings_rows:
-            if not matches(r):
-                continue
-            row_product = str(r.get("product") or "DELIVERY").upper()
-            if row_product != "DELIVERY":
-                continue
-            available = r.get("authorizedQuantity")
-            if available in (None, ""):
-                available = r.get("totalQuantity", r.get("quantity"))
-            qty += max(0, int(_num(available)))
-        return qty
+        return _delivery_holdings(matches, holdings_rows)[1]
+    return max(0, _positions_net(matches, positions_rows, product))
 
-    qty = 0
-    for r in positions_rows:
-        if matches(r) and str(r.get("product") or "").upper() == product:
-            qty += int(_num(r.get("netQuantity", r.get("quantity"))))
-    return max(0, qty)
 
-    qty = 0
-    for r in positions_rows:
-        if matches(r) and str(r.get("product") or "").upper() == product:
-            qty += int(_num(r.get("netQuantity", r.get("quantity"))))
-    if product == "DELIVERY":
-        for r in holdings_rows:
-            if matches(r):
-                qty += int(_num(r.get("totalQuantity", r.get("quantity"))))
-    return qty
+def broker_owned_quantity(instrument_id, trading_symbol, product, positions_rows, holdings_rows):
+    """OWNED quantity used only to detect positions sold outside the bot.
+
+    Must never under-count: a too-low number would wrongly mark the bot's lots
+    as "exited manually". Shares bought today may sit in positions and not yet
+    in holdings, and holdings may or may not already include today's trades,
+    so the largest consistent reading is used.
+    """
+    matches = _match_fn(instrument_id, trading_symbol)
+    net = _positions_net(matches, positions_rows, product)
+    if product != "DELIVERY":
+        return max(0, net)
+    total = _delivery_holdings(matches, holdings_rows)[0]
+    return max(0, total + net, total, net)

@@ -113,6 +113,10 @@ def paper_entry_second(bot_id, slot):
     return 7 + (n % 46)
 
 
+def _exit_conditions_on(bot):
+    return float(bot.get("exit_rsi_min") or 0) > 0 or float(bot.get("exit_volume_min") or 0) > 0
+
+
 def _parse_ts(value):
     if not value:
         return None
@@ -407,7 +411,9 @@ class Engine:
                             "generated_at": db.now_utc()
                         })
                         skip = indicator_skip
-                    else:
+                    elif config.LIVE_ENTRY_REQUIRE_CONFIRM:
+                        # Optional manual mode (.env LIVE_ENTRY_REQUIRE_CONFIRM=true):
+                        # publish the signal and wait for "Confirm BUY" on the dashboard.
                         db.set_runtime(ready_key, {
                             "ready": True,
                             "bot_id": bot_id,
@@ -419,6 +425,18 @@ class Engine:
                             "generated_at": db.now_utc()
                         })
                         skip = "LIVE entry READY: RSI/Volume conditions matched; confirm BUY on dashboard"
+                    else:
+                        # Fully automatic (default): conditions matched, so the BUY goes
+                        # through the normal order path below (limits, duplicate-proof
+                        # order key, fill tracking). Nothing waits for the dashboard.
+                        db.set_runtime(ready_key, {
+                            "ready": False, "auto": True, "slot": slot,
+                            "reason": "Conditions matched – BUY sent automatically",
+                            "rsi": snap.get("rsi"), "volume_ratio": snap.get("volume_ratio"),
+                            "generated_at": db.now_utc()
+                        })
+                        log.info("event=AUTO_ENTRY_MATCH bot_id=%s slot=%s ltp=%s rsi=%s volx=%s",
+                                 bot_id, slot, ltp, snap.get("rsi"), snap.get("volume_ratio"))
                 except Exception as exc:
                     db.set_runtime(f"entry_ready:{bot_id}", {
                         "ready": False, "slot": slot,
@@ -563,16 +581,19 @@ class Engine:
                 nxt = _parse_ts(lot["next_exit_at"])
                 if nxt and now < nxt:
                     continue
-            if ltp >= float(lot["target_price"]):
-                if bot["mode"] == "PAPER" and indicator_conditions.enabled(bot):
-                    try:
-                        snap = indicator_conditions.snapshot(bot, now)
-                        why = indicator_conditions.exit_block_reason(bot, snap)
-                    except Exception as exc:
-                        why = f"Exit indicator unavailable: {str(exc)[:120]}"
-                    if why:
-                        self._bot_error(bot["bot_id"], why)
-                        continue
+            target_hit = ltp >= float(lot["target_price"])
+            if target_hit and _exit_conditions_on(bot):
+                # Target reached, but the bot's exit RSI / volume condition must also
+                # match (same rule for PAPER and LIVE). Unavailable data = keep holding.
+                try:
+                    snap = indicator_conditions.snapshot(bot, now)
+                    why = indicator_conditions.exit_block_reason(bot, snap)
+                except Exception as exc:
+                    why = f"Exit indicator unavailable: {str(exc)[:120]}"
+                if why:
+                    self._bot_error(bot["bot_id"], why)
+                    target_hit = False
+            if target_hit:
                 reason = "TARGET"
             elif eod:
                 reason = "INTRADAY_SQUAREOFF"
@@ -959,21 +980,25 @@ class Engine:
         report = []
         for g in groups:
             key = (str(g["iid"]), g["product"])
-            bq = self.broker.broker_quantity(g["iid"], g["tsym"], g["product"], pos, hold)
+            bq = self.broker.broker_quantity(g["iid"], g["tsym"], g["product"], pos, hold)   # sellable
             self.snapshot[key] = bq
+            owned_fn = getattr(self.broker, "broker_owned_quantity", None)
+            owned = owned_fn(g["iid"], g["tsym"], g["product"], pos, hold) if owned_fn else bq
             mkey = f"{g['iid']}|{g['product']}"
-            short = bq < int(g["local_qty"])
+            # Manual-exit detection compares what the account OWNS (never under-counted),
+            # not what is sellable right now; today's DELIVERY buys may not be sellable yet.
+            short = owned < int(g["local_qty"])
             self.mismatch_counts[mkey] = self.mismatch_counts.get(mkey, 0) + 1 if short else 0
             if self.mismatch_counts[mkey] == 2:
                 elog("POSITION_MISMATCH",
-                     f"{g['tsym']} {g['product']}: broker {bq} < bot lots {g['local_qty']}; new entries paused",
+                     f"{g['tsym']} {g['product']}: broker owns {owned} < bot lots {g['local_qty']}; new entries paused",
                      level="ERROR", symbol=g["tsym"])
             if short and self.mismatch_counts[mkey] >= config.MANUAL_EXIT_CONFIRM_CHECKS:
-                if self.close_manual_exits(str(g["iid"]), g["product"], int(g["local_qty"]) - bq, now):
+                if self.close_manual_exits(str(g["iid"]), g["product"], int(g["local_qty"]) - owned, now):
                     self.mismatch_counts[mkey] = 0
                     g = {**g, "local_qty": bq}
                     short = False
-            report.append({"symbol": g["tsym"], "product": g["product"], "broker_qty": bq,
+            report.append({"symbol": g["tsym"], "product": g["product"], "broker_qty": owned, "sellable_qty": bq,
                            "bot_qty": int(g["local_qty"]), "mismatch": short and self.mismatch_counts[mkey] >= 2})
         self.snapshot_at = now
         db.set_runtime("reconciliation", {"at": now.isoformat(), "rows": report})

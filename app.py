@@ -592,6 +592,11 @@ def _bot_summary(bot):
     bot["entry_ready_qty"] = int(ready.get("qty") or 0) if bot["entry_ready"] else 0
     bot["entry_ready_rsi"] = ready.get("rsi") if bot["entry_ready"] else None
     bot["entry_ready_ltp"] = ready.get("ltp") if bot["entry_ready"] else None
+    # Last automatic BUY signal (shown for 15 minutes)
+    auto = bool(ready.get("auto")) and age is not None and age <= 900
+    bot["entry_auto"] = {"rsi": ready.get("rsi"), "volume_ratio": ready.get("volume_ratio"),
+                         "slot": ready.get("slot")} if auto else None
+    bot["entry_confirm_mode"] = bool(config.LIVE_ENTRY_REQUIRE_CONFIRM)
     return bot
 
 
@@ -811,6 +816,9 @@ def api_bot_confirm_entry(bot_id):
     if body.get("confirm") != "BUY":
         return jsonify({"status": "error", "message": "Explicit BUY confirmation required"}), 400
 
+    if not config.LIVE_ENTRY_REQUIRE_CONFIRM:
+        return jsonify({"status": "error", "message": "Automatic mode is on: the bot buys by itself when conditions match. "
+                        "(Set LIVE_ENTRY_REQUIRE_CONFIRM=true in .env for manual confirmation.)"}), 409
     bot = get_bot(bot_id)
     if not bot:
         return jsonify({"status": "error", "message": "Bot not found"}), 404

@@ -29,6 +29,9 @@ import bot_store  # noqa: E402
 import config  # noqa: E402
 import db  # noqa: E402
 import engine as eng  # noqa: E402
+import indicator_conditions  # noqa: E402
+
+_REAL_ENTRY_SECOND = eng.paper_entry_second
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -40,6 +43,7 @@ class FakeBroker:
     SessionExpired = real_broker.SessionExpired
     build_order = staticmethod(real_broker.build_order)
     broker_quantity = staticmethod(real_broker.broker_quantity)
+    broker_owned_quantity = staticmethod(real_broker.broker_owned_quantity)
 
     def __init__(self):
         self.placed = []
@@ -48,7 +52,7 @@ class FakeBroker:
         self.next_outcome = "ACCEPTED"
         self.session_valid = True
         self.positions_rows = None   # None = derive from filled orders
-        self.holdings_rows = []
+        self.holdings_rows = None    # None = DELIVERY fills show up as sellable holdings (BTST)
         self.auto_fill_price = None   # fill every accepted order at this price
 
     def check_session(self):
@@ -108,7 +112,14 @@ class FakeBroker:
         return [{"instrumentId": k[0], "product": k[1], "netQuantity": v} for k, v in net.items()]
 
     def holdings(self):
-        return self.holdings_rows
+        if self.holdings_rows is not None:
+            return self.holdings_rows
+        net = {}
+        for r in self.book.values():
+            if r["status"] == "COMPLETE" and r["product"] == "DELIVERY":
+                net[r["instrument_id"]] = net.get(r["instrument_id"], 0) + (
+                    r["filled_qty"] if r["side"] == "BUY" else -r["filled_qty"])
+        return [{"instrumentId": k, "product": "DELIVERY", "totalQuantity": v} for k, v in net.items() if v > 0]
 
 
 class Base(unittest.TestCase):
@@ -121,6 +132,8 @@ class Base(unittest.TestCase):
         config.GLOBAL_MAX_CAPITAL = 1000000.0
         config.HOLIDAYS_FILE = os.path.join(_TMP, "holidays.json")
         config.BOT_DATA_FILE = os.path.join(_TMP, "bots.json")
+        config.LIVE_ENTRY_REQUIRE_CONFIRM = False
+        eng.paper_entry_second = lambda bot_id, slot: 0
         db._initialized_paths.clear()
         for f in os.listdir(_TMP):
             os.remove(os.path.join(_TMP, f))
@@ -470,6 +483,7 @@ class TestManualExit(Base):
     def test_manual_exit_uses_trade_book_price(self):
         bid = self.setup_lots(2)
         self.broker.positions_rows = []                      # user sold both in IIFL app
+        self.broker.holdings_rows = []
         self.broker.trades.append({"broker_order_id": "MAN1", "trade_ref": "X1", "qty": 2, "price": 59.80,
                                    "time": "", "instrument_id": "6792", "side": "SELL", "product": "DELIVERY"})
         self.recon_ticks()
@@ -486,6 +500,7 @@ class TestManualExit(Base):
         bid = self.setup_lots(1)
         self.prices["6792"] = 58.70
         self.broker.positions_rows = []
+        self.broker.holdings_rows = []
         self.recon_ticks()
         lot = self.lots(bid)[0]
         self.assertEqual((lot["status"], lot["exit_price"]), ("CLOSED", 58.70))
@@ -494,6 +509,7 @@ class TestManualExit(Base):
     def test_partial_manual_exit_splits_lot(self):
         bid = self.setup_lots(1, qty=3)
         self.broker.positions_rows = [{"instrumentId": "6792", "product": "DELIVERY", "netQuantity": 1}]
+        self.broker.holdings_rows = []
         self.recon_ticks()
         closed = self.lots(bid, "CLOSED"); still = self.lots(bid, "OPEN")
         self.assertEqual((closed[0]["quantity"], still[0]["quantity"]), (2, 1))
@@ -508,8 +524,147 @@ class TestManualExit(Base):
     def test_needs_several_checks(self):
         bid = self.setup_lots(1)
         self.broker.positions_rows = []
+        self.broker.holdings_rows = []
         self.recon_ticks(1)
         self.assertEqual(self.lots(bid)[0]["status"], "OPEN")
+
+
+class TestAutoEntry(Base):
+    """LIVE bots with RSI / volume conditions buy without any dashboard click."""
+
+    def setUp(self):
+        super().setUp()
+        self.snap = {"rsi": 28.0, "rsi_prev": 31.0, "volume": 5000, "volume_ratio": 2.5,
+                     "candle": "2026-10-05 10:00"}
+        self.calls = 0
+
+        def fake_snapshot(bot, now=None):
+            self.calls += 1
+            if isinstance(self.snap, Exception):
+                raise self.snap
+            return dict(self.snap)
+        self._orig = indicator_conditions.snapshot
+        indicator_conditions.snapshot = fake_snapshot
+
+    def tearDown(self):
+        indicator_conditions.snapshot = self._orig
+
+    def rsi_bot(self, **kw):
+        bid = self.add_bot()
+        bot_store.update_bot(bid, entry_rsi_max=kw.get("rsi", 30), entry_volume_min=kw.get("vol", 2),
+                             exit_rsi_min=kw.get("exit_rsi", 0), product=kw.get("product", "DELIVERY"))
+        return bid
+
+    def test_matched_conditions_buy_automatically(self):
+        bid = self.rsi_bot()
+        self.tick()
+        self.assertEqual(len(self.broker.placed), 1)
+        self.assertEqual(self.broker.placed[0][0]["transactionType"], "BUY")
+        ready = db.get_runtime(f"entry_ready:{bid}")
+        self.assertTrue(ready["auto"])
+        self.assertFalse(ready["ready"])           # no Confirm BUY button
+        self.broker.fill(db.row("SELECT * FROM orders")["broker_order_id"], 59.0)
+        self.tick()
+        self.assertEqual(len(self.lots(bid, "OPEN")), 1)
+
+    def test_unmatched_conditions_do_not_buy(self):
+        self.rsi_bot()
+        self.snap["rsi"] = 45.0                    # above Entry RSI <= 30
+        self.tick()
+        self.assertEqual(self.broker.placed, [])
+        self.snap.update(rsi=28.0, volume_ratio=1.1)   # volume too low
+        self.now += timedelta(minutes=1)
+        self.tick()
+        self.assertEqual(self.broker.placed, [])
+
+    def test_indicator_failure_never_buys(self):
+        bid = self.rsi_bot()
+        self.snap = RuntimeError("Indicator data is stale (last 1-minute candle 2026-10-04 15:29); entry skipped")
+        self.tick()
+        self.assertEqual(self.broker.placed, [])
+        self.assertIn("stale", bot_store.get_bot(bid)["last_error"])
+
+    def test_one_order_per_slot_even_after_restart(self):
+        self.rsi_bot()
+        self.tick(1); self.tick(1)
+        self.restart()
+        self.tick(1)
+        self.assertEqual(len(self.broker.placed), 1)
+
+    def test_confirm_mode_still_available(self):
+        config.LIVE_ENTRY_REQUIRE_CONFIRM = True
+        bid = self.rsi_bot()
+        self.tick()
+        self.assertEqual(self.broker.placed, [])
+        self.assertTrue(db.get_runtime(f"entry_ready:{bid}")["ready"])
+
+    def test_exit_condition_waits_but_square_off_always_sells(self):
+        bid = self.rsi_bot(exit_rsi=70, product="INTRADAY")
+        self.broker.auto_fill_price = 59.0
+        self.tick()                                 # bought
+        self.prices["6792"] = 60.0                  # above target, but RSI 28 < exit 70
+        self.tick(); self.tick()
+        self.assertEqual(db.scalar("SELECT COUNT(*) FROM orders WHERE side='SELL'"), 0)
+        self.now = self.now.replace(hour=15, minute=10)
+        self.tick(); self.tick()
+        self.assertEqual(self.lots(bid, "CLOSED")[0]["exit_reason"], "INTRADAY_SQUAREOFF")
+
+    def test_exit_condition_met_sells_at_target(self):
+        bid = self.rsi_bot(exit_rsi=70)
+        self.broker.auto_fill_price = 59.0
+        self.tick()
+        self.snap["rsi"] = 75.0
+        self.prices["6792"] = 60.0
+        self.tick(); self.tick()
+        self.assertEqual(self.lots(bid, "CLOSED")[0]["exit_reason"], "TARGET")
+
+    def test_entry_only_conditions_do_not_block_target_exit(self):
+        bid = self.rsi_bot()                        # entry conditions only
+        self.broker.auto_fill_price = 59.0
+        self.tick()
+        self.snap = RuntimeError("feed down")       # indicator outage must not stop a target sale
+        self.prices["6792"] = 60.0
+        self.tick(); self.tick()
+        self.assertEqual(len(self.lots(bid, "CLOSED")), 1)
+
+
+class TestOwnedVsSellable(Base):
+    def test_todays_delivery_buy_not_marked_manual_when_holdings_lag(self):
+        bid = self.add_bot()
+        self.broker.auto_fill_price = 59.0
+        self.tick()
+        bot_store.update_bot(bid, status="STOPPED")  # no further buys; keep managing the lot
+        self.broker.holdings_rows = []              # IIFL holdings not updated yet today
+        for _ in range(5):
+            self.engine.last_recon = None
+            self.tick(30)
+        self.assertEqual(len(self.lots(bid, "OPEN")), 1)
+        self.assertEqual(db.scalar("SELECT COUNT(*) FROM trades WHERE exit_reason='MANUAL'"), 0)
+
+    def test_zero_authorized_quantity_is_not_zero_sellable(self):
+        rows = [{"instrumentId": "6792", "product": "DELIVERY", "totalQuantity": 10, "authorizedQuantity": 0}]
+        self.assertEqual(real_broker.broker_quantity("6792", "SBC-EQ", "DELIVERY", [], rows), 10)
+        rows[0]["authorizedQuantity"] = 4
+        self.assertEqual(real_broker.broker_quantity("6792", "SBC-EQ", "DELIVERY", [], rows), 4)
+
+    def test_owned_never_undercounts(self):
+        pos = [{"instrumentId": "6792", "product": "DELIVERY", "netQuantity": -5}]
+        hold = [{"instrumentId": "6792", "product": "DELIVERY", "totalQuantity": 5}]
+        # holdings already reduced by today's sale: owned stays 5, not 0
+        self.assertEqual(real_broker.broker_owned_quantity("6792", "SBC-EQ", "DELIVERY", pos, hold), 5)
+
+
+class TestPaperJitter(Base):
+    def test_paper_entry_waits_for_its_second(self):
+        eng.paper_entry_second = _REAL_ENTRY_SECOND
+        bid = self.add_bot(mode="PAPER")
+        due = _REAL_ENTRY_SECOND(bid, "2026-10-05T10:00")
+        self.now = self.now.replace(second=max(0, due - 1))
+        self.engine.run_once()
+        self.assertEqual(self.lots(bid), [])
+        self.now = self.now.replace(second=due)
+        self.engine.run_once()
+        self.assertEqual(len(self.lots(bid)), 1)
 
 
 class TestBatch(Base):

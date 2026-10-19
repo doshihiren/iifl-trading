@@ -410,7 +410,8 @@ function renderBots(){
 
     const statusLabel=b.status==='STOPPED'&&b.open_positions>0?'STOPPED • exits active':b.status;
     const ready=Boolean(b.entry_ready) || String(b.last_error||'').startsWith('LIVE entry READY:');
-    const readyText=b.entry_ready?'<div class="mutedline ok"><b>BUY READY</b> • RSI '+esc(b.entry_ready_rsi)+' • qty '+esc(b.entry_ready_qty)+' • signal ₹'+px(b.entry_ready_ltp)+'</div>':'';
+    const autoText=b.entry_auto?'<div class="mutedline ok"><b>AUTO BUY sent</b> • RSI '+esc(b.entry_auto.rsi)+(b.entry_auto.volume_ratio!=null?' • vol '+esc(b.entry_auto.volume_ratio)+'×':'')+'</div>':'';
+    const readyText=autoText+(b.entry_ready?'<div class="mutedline ok"><b>BUY READY</b> • RSI '+esc(b.entry_ready_rsi)+' • qty '+esc(b.entry_ready_qty)+' • signal ₹'+px(b.entry_ready_ltp)+'</div>':'');
     const err=b.last_error?'<div class="mutedline '+(ready?'ok':'err')+'">'+esc(b.last_error)+'</div>':'';
     const pend=b.pending_orders?'<div class="mutedline">'+b.pending_orders+' broker order(s) pending</div>':'';
     let batch='';

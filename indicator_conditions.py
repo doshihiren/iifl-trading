@@ -1,4 +1,4 @@
-"""RSI and volume condition helper for PAPER bot filtering.
+"""RSI and volume condition helper for PAPER and LIVE bot filtering.
 
 The helper is intentionally read-only: it fetches recent IIFL candles and
 returns indicator values. 0/blank bot settings are treated as disabled.
@@ -14,6 +14,18 @@ import rsi_backtest as rb
 IST = ZoneInfo("Asia/Kolkata")
 _CACHE = {}
 TTL_SECONDS = 55
+# LIVE bots buy automatically on these values, so they must come from a
+# recent candle. Older data raises an error and the entry is skipped.
+MAX_CANDLE_AGE_MINUTES = 5
+
+
+def _check_fresh(value, now):
+    last = datetime.strptime(value["candle"], "%Y-%m-%d %H:%M").replace(tzinfo=IST)
+    now_ist = now.astimezone(IST) if now.tzinfo else now.replace(tzinfo=IST)
+    age_min = (now_ist - last).total_seconds() / 60.0
+    if age_min > MAX_CANDLE_AGE_MINUTES:
+        raise RuntimeError(f"Indicator data is stale (last 1-minute candle {value['candle']}); entry skipped")
+    return value
 
 
 def enabled(bot):
@@ -27,7 +39,7 @@ def snapshot(bot, now=None):
     key = (str(bot["instrumentId"]), str(bot.get("exchange") or "NSEEQ"))
     cached = _CACHE.get(key)
     if cached and time.time() - cached["at"] < TTL_SECONDS:
-        return cached["value"]
+        return _check_fresh(cached["value"], now)
 
     rows = candle_store.iifl_fetch(
         key[0],
@@ -56,7 +68,7 @@ def snapshot(bot, now=None):
         "candle": rows[-1]["ts"],
     }
     _CACHE[key] = {"at": time.time(), "value": value}
-    return value
+    return _check_fresh(value, now)
 
 
 def entry_block_reason(bot, snap):
