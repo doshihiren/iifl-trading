@@ -397,7 +397,15 @@ class Engine:
             if not skip and self._mismatched(bot):
                 skip = "Broker quantity is lower than bot positions; new entries paused"
             if not skip and indicator_conditions.enabled(bot):
-                skip = "LIVE RSI/Volume filters are not auto-executed; new entries blocked"
+                try:
+                    snap = indicator_conditions.snapshot(bot, now)
+                    indicator_skip = indicator_conditions.entry_block_reason(bot, snap)
+                    if indicator_skip:
+                        skip = indicator_skip
+                    else:
+                        skip = "LIVE entry READY: RSI/Volume conditions matched; confirmation required"
+                except Exception as exc:
+                    skip = f"Entry indicator unavailable: {str(exc)[:120]}"
         if not skip and mode == "PAPER" and indicator_conditions.enabled(bot):
             try:
                 snap = indicator_conditions.snapshot(bot, now)
