@@ -580,6 +580,18 @@ def _bot_summary(bot):
         "SELECT COUNT(*) FROM orders WHERE bot_id=? AND side='BUY' AND batch_no=? "
         "AND state IN ('FILLED',?,?,?,?)",
         (bot["bot_id"], int(bot.get("batch_no") or 1), *ACTIVE_ORDER_STATES)) or 0)
+
+    ready = db.get_runtime(f"entry_ready:{bot['bot_id']}") or {}
+    age = _age_seconds(ready.get("generated_at"))
+    bot["entry_ready"] = bool(
+        bot.get("mode") == "LIVE"
+        and ready.get("ready")
+        and age is not None
+        and age <= 90
+    )
+    bot["entry_ready_qty"] = int(ready.get("qty") or 0) if bot["entry_ready"] else 0
+    bot["entry_ready_rsi"] = ready.get("rsi") if bot["entry_ready"] else None
+    bot["entry_ready_ltp"] = ready.get("ltp") if bot["entry_ready"] else None
     return bot
 
 
