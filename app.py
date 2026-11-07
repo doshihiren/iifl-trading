@@ -1008,6 +1008,10 @@ def api_system():
         "status": "Ok",
         "result": {
             "broker_session": badge,
+            "targets_waiting": db.scalar(
+                "SELECT COUNT(*) FROM trades t JOIN bots b ON b.bot_id=t.bot_id "
+                "WHERE t.mode='LIVE' AND t.status='OPEN' AND b.last_ltp IS NOT NULL "
+                "AND b.last_ltp >= t.target_price") or 0,
             "session_detail": session_state.get("detail"),
             "session_checked_at": session_state.get("checked_at"),
             "worker": worker,

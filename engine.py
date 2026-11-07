@@ -253,9 +253,21 @@ class Engine:
 
         try:
             if live_work:
-                self.sync_live_orders(now)
+                # A failing order-book / positions call must not stop exits for every bot.
+                try:
+                    self.sync_live_orders(now)
+                except self.broker.SessionExpired:
+                    raise
+                except Exception as exc:
+                    log.warning("event=ORDER_SYNC_FAILED error=%s", exc)
+                    db.add_event("ORDER_SYNC_FAILED", f"Could not read IIFL order book: {str(exc)[:200]}", level="WARNING")
                 if self.last_recon is None or (now - self.last_recon).total_seconds() >= config.RECON_SECONDS:
-                    self.reconcile_positions(now)
+                    try:
+                        self.reconcile_positions(now)
+                    except self.broker.SessionExpired:
+                        raise
+                    except Exception as exc:
+                        log.warning("event=RECON_FAILED error=%s", exc)
             if status != "OPEN":
                 return
 
@@ -317,11 +329,18 @@ class Engine:
         with db.tx() as c:
             c.execute("UPDATE bots SET last_ltp=?, last_tick=?, updated_at=? WHERE bot_id=?",
                       (ltp, now.isoformat(), db.now_utc(), bot_id))
-        if stale:
-            self._bot_error(bot_id, f"Stale quote (exchange time {qdt:%H:%M:%S}); trading paused")
+        if stale and qdt.astimezone(IST).date() != now.astimezone(IST).date():
+            # Price is from an earlier day (pre-open, holiday, feed problem): do nothing.
+            self._bot_error(bot_id, f"Stale quote (last trade {qdt:%d %b %H:%M}); trading paused")
             return
 
+        # Exits run even when the stock has not traded for a few minutes: the last
+        # price is today's, and holding back a profitable sale is the bigger risk.
         self.manage_exits(bot, ltp, now)
+
+        if stale:
+            self._bot_error(bot_id, f"No trade since {qdt:%H:%M:%S}; new buys paused, exits still active")
+            return
 
         fresh = db.row("SELECT * FROM bots WHERE bot_id=?", (bot_id,))
         if fresh["status"] == "EXITING":
@@ -583,15 +602,18 @@ class Engine:
                     continue
             target_hit = ltp >= float(lot["target_price"])
             if target_hit and _exit_conditions_on(bot):
-                # Target reached, but the bot's exit RSI / volume condition must also
-                # match (same rule for PAPER and LIVE). Unavailable data = keep holding.
+                # Target reached; the bot's exit RSI / volume condition must also match
+                # (same rule for PAPER and LIVE). If the indicator data is missing or stale
+                # the profit is taken at target instead of waiting indefinitely.
                 try:
                     snap = indicator_conditions.snapshot(bot, now)
                     why = indicator_conditions.exit_block_reason(bot, snap)
                 except Exception as exc:
-                    why = f"Exit indicator unavailable: {str(exc)[:120]}"
+                    why = None
+                    log.warning("event=EXIT_INDICATOR_UNAVAILABLE bot_id=%s lot=%s error=%s -> selling at target",
+                                bot["bot_id"], lot["id"], exc)
                 if why:
-                    self._bot_error(bot["bot_id"], why)
+                    self._bot_error(bot["bot_id"], f"Target reached, waiting for exit condition: {why}")
                     target_hit = False
             if target_hit:
                 reason = "TARGET"
@@ -751,10 +773,33 @@ class Engine:
 
             r = by_id.get(o["broker_order_id"])
             if r is None:
-                if age > 900:
+                sent = _parse_ts(o["submitted_at"])
+                if sent is not None and sent.astimezone(IST).date() < now.astimezone(IST).date():
+                    # IIFL's order book lists only today's orders and DAY orders expire at the
+                    # close. An order from an earlier day that never resolved is finished; leaving
+                    # it "pending" would block its lot from ever being sold again.
+                    self._expire_old_order(o, sent)
+                elif age > 900:
                     self._bot_error(o["bot_id"], f"Order #{o['broker_order_id']} missing from IIFL order book")
                 continue
             self._apply_book_row(o, r, trade_rows, now, age)
+
+    def _expire_old_order(self, o, sent):
+        ts = db.now_utc()
+        with db.tx() as c:
+            c.execute("UPDATE orders SET state='EXPIRED', reject_reason=?, completed_at=?, updated_at=? "
+                      "WHERE id=? AND state IN ('SUBMITTED','PARTIALLY_FILLED','UNKNOWN')",
+                      (f"Order from {sent.astimezone(IST):%d %b} not in today's IIFL order book; day order expired",
+                       ts, ts, o["id"]))
+            if o["side"] == "SELL" and o["lot_id"]:
+                # Back to OPEN so today's target check can sell it again. If yesterday's sale did
+                # fill after all, the owned-quantity check marks the lot as sold outside the bot,
+                # and the sellable check stops a second sale.
+                c.execute("UPDATE trades SET status='OPEN', next_exit_at=NULL WHERE id=? AND status='EXIT_SUBMITTED'",
+                          (o["lot_id"],))
+        elog("ORDER_EXPIRED", f"{o['side']} {o['symbol']} #{o['broker_order_id']} from {sent.astimezone(IST):%d %b} "
+             f"expired (not in today's order book)" + ("; position will be re-checked for exit" if o["side"] == "SELL" else ""),
+             level="WARNING", bot_id=o["bot_id"], broker_order_id=o["broker_order_id"])
 
     def _match_unknown(self, o, book, linked):
         if o["order_tag"]:
@@ -876,7 +921,8 @@ class Engine:
         if o["side"] == "SELL" and o["lot_id"]:
             lot = c.execute("SELECT exit_attempts FROM trades WHERE id=?", (o["lot_id"],)).fetchone()
             attempts = int(lot["exit_attempts"] or 0) if lot else 0
-            delay = config.EXIT_RETRY_SECONDS if attempts < config.EXIT_MAX_ATTEMPTS else 1800
+            # After EXIT_MAX_ATTEMPTS quick retries, keep trying every 5 minutes (not 30).
+            delay = config.EXIT_RETRY_SECONDS if attempts < config.EXIT_MAX_ATTEMPTS else 300
             nxt = (self.now() + timedelta(seconds=delay)).isoformat()
             c.execute("UPDATE trades SET status='OPEN', next_exit_at=? WHERE id=? AND status='EXIT_SUBMITTED'",
                       (nxt, o["lot_id"]))

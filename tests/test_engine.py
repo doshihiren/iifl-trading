@@ -144,7 +144,7 @@ class Base(unittest.TestCase):
 
     def make_engine(self):
         def quotes(instruments):
-            return {iid: (self.prices.get(iid), None, None) for iid, _ in instruments}
+            return {iid: (self.prices.get(iid), getattr(self, 'qtime', None), None) for iid, _ in instruments}
         e = eng.Engine(broker=self.broker, quotes=quotes, now_fn=lambda: self.now)
         e.startup()
         return e
@@ -372,7 +372,7 @@ class TestLive(Base):
     def test_sell_rejected_returns_lot_to_open_and_retries(self):
         bid = self.add_bot()
         self.broker.auto_fill_price = 59.0
-        self.tick()
+        self.tick(); self.tick()
         self.broker.auto_fill_price = None
         self.prices["6792"] = 60.0
         self.tick()
@@ -461,8 +461,6 @@ class TestLive(Base):
         self.assertEqual(len(self.lots(bid, "OPEN")), 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestManualExit(Base):
@@ -753,3 +751,97 @@ class TestReports(Base):
         old = reports.build({"from": "2026-01-01", "to": "2026-01-31"})
         self.assertEqual(old["summary"]["trades"], 0)
         self.assertEqual(len(old["trades"]), 1)      # open trade is always listed
+
+
+class TestExitReliability(Base):
+    """A profitable lot must not get stuck: old orders, broker hiccups, missing data."""
+
+    def open_lot(self, **kw):
+        bid = self.add_bot(**kw)
+        self.broker.auto_fill_price = 59.0
+        self.tick(); self.tick()
+        self.broker.auto_fill_price = None
+        bot_store.update_bot(bid, status="STOPPED")          # no new buys, exits continue
+        self.assertEqual(len(self.lots(bid, "OPEN")), 1)
+        return bid
+
+    def sells(self):
+        return [p for p in self.broker.placed if p[0]["transactionType"] == "SELL"]
+
+    def test_previous_day_sell_expires_and_is_resent(self):
+        bid = self.open_lot()
+        self.prices["6792"] = 59.70
+        self.tick()
+        self.assertEqual(len(self.sells()), 1)
+        self.assertEqual(self.lots(bid)[0]["status"], "EXIT_SUBMITTED")
+        # Next morning: IIFL's order book starts empty, shares are in holdings.
+        self.now = datetime(2026, 10, 6, 9, 20, 0, tzinfo=IST)
+        self.broker.book = {}
+        self.broker.positions_rows = []
+        self.broker.holdings_rows = [{"instrumentId": "6792", "product": "DELIVERY", "totalQuantity": 1}]
+        self.tick(); self.tick()
+        old = db.row("SELECT * FROM orders WHERE side='SELL' ORDER BY id LIMIT 1")
+        self.assertEqual(old["state"], "EXPIRED")
+        self.assertEqual(len(self.sells()), 2)
+        self.assertEqual(self.lots(bid)[0]["status"], "EXIT_SUBMITTED")
+        self.assertEqual(db.scalar("SELECT COUNT(*) FROM trades WHERE exit_reason='MANUAL'"), 0)
+
+    def test_order_book_failure_does_not_block_exit(self):
+        bid = self.open_lot()
+
+        def broken():
+            raise RuntimeError("HTTP 500 from /v1/orders")
+        self.broker.order_book = broken
+        self.prices["6792"] = 59.70
+        self.tick()
+        self.assertEqual(len(self.sells()), 1)
+
+    def test_stale_quote_same_day_still_exits_but_no_buy(self):
+        bid = self.open_lot()
+        bot_store.update_bot(bid, status="RUNNING")
+        self.now += timedelta(minutes=1)
+        self.prices["6792"] = 59.70
+        self.qtime = (self.now - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        buys_before = len(self.broker.placed) - len(self.sells())
+        self.tick()
+        self.assertEqual(len(self.sells()), 1)
+        self.assertEqual(len(self.broker.placed) - len(self.sells()), buys_before)
+        self.assertIn("exits still active", bot_store.get_bot(bid)["last_error"])
+
+    def test_stale_quote_from_earlier_day_does_nothing(self):
+        self.open_lot()
+        self.prices["6792"] = 59.70
+        self.qtime = "2026-10-02 15:29:00"
+        self.tick()
+        self.assertEqual(self.sells(), [])
+
+
+class TestExitConditionFallback(TestAutoEntry):
+    def lot_with_exit_rsi(self):
+        bid = self.rsi_bot(exit_rsi=70)
+        self.broker.auto_fill_price = 59.0
+        self.tick(); self.tick()
+        self.broker.auto_fill_price = None
+        bot_store.update_bot(bid, status="STOPPED")
+        self.prices["6792"] = 59.70
+        return bid
+
+    def sells(self):
+        return [p for p in self.broker.placed if p[0]["transactionType"] == "SELL"]
+
+    def test_missing_indicator_data_sells_at_target(self):
+        self.lot_with_exit_rsi()
+        self.snap = RuntimeError("Indicator data is stale")
+        self.tick()
+        self.assertEqual(len(self.sells()), 1)
+
+    def test_condition_not_met_waits_and_says_why(self):
+        bid = self.lot_with_exit_rsi()
+        self.snap["rsi"] = 50.0
+        self.tick()
+        self.assertEqual(self.sells(), [])
+        self.assertIn("waiting for exit condition", bot_store.get_bot(bid)["last_error"])
+
+
+if __name__ == "__main__":
+    unittest.main()

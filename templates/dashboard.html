@@ -490,6 +490,10 @@ async function loadSystem(){
     const ll=document.getElementById('loginLink');
     ll.textContent = sess==='CONNECTED' ? '↻ Re-login IIFL' : '🔑 Login to IIFL';
     ll.className = 'badge ' + (sess==='CONNECTED' ? 'info' : 'warn');
+    if(sess!=='CONNECTED' && s.targets_waiting>0){
+      ll.textContent = '🔑 Login to IIFL — '+s.targets_waiting+' trade(s) at target cannot sell';
+      ll.className = 'badge bad';
+    }
     setBadge('workerBadge', 'WORKER '+s.worker, s.worker==='RUNNING'?'':'bad');
     setBadge('marketBadge', 'MARKET '+String(s.market||'').replace('_',' '), s.market==='OPEN'?'':'info');
     const liveOn = s.live_trading && s.ip_authorized;

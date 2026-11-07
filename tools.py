@@ -5,6 +5,7 @@
     python tools.py status            bots, open lots and pending orders from the database
     python tools.py broker-check      read-only: session, order book, trade book, positions, holdings
     python tools.py worker-dry-run    run one engine cycle in the foreground (stop the service first)
+    python tools.py exit-check        why each open LIVE trade has (or has not) been sold
     python tools.py candles-check SBC show IIFL's raw 1-minute candle reply for the last trading day
     python tools.py purge-paper       show what PAPER data would be deleted
     python tools.py purge-paper --yes back up the database, then delete all PAPER bots/trades/orders
@@ -56,6 +57,34 @@ def cmd_status():
     print("pending orders:", pend or "none")
     print("session:", db.get_runtime("broker_session"))
     print("worker heartbeat:", db.get_runtime("worker_heartbeat"))
+
+
+def cmd_exit_check():
+    sess = db.get_runtime("broker_session") or {}
+    print("IIFL session:", sess.get("state"), "-", sess.get("detail") or "", "(checked", sess.get("checked_at"), ")")
+    print("worker heartbeat:", (db.get_runtime("worker_heartbeat") or {}).get("at"))
+    lots = db.rows("SELECT t.*, b.last_ltp, b.last_tick, b.status AS bot_status, b.last_error, b.exit_rsi_min, "
+                   "b.exit_volume_min FROM trades t JOIN bots b ON b.bot_id=t.bot_id "
+                   "WHERE t.mode='LIVE' AND t.status IN ('OPEN','EXIT_SUBMITTED') ORDER BY t.bot_id, t.id")
+    if not lots:
+        print("No open LIVE trades.")
+        return
+    for t in lots:
+        ltp, tgt = t["last_ltp"], float(t["target_price"])
+        hit = ltp is not None and ltp >= tgt
+        print(f"\nlot {t['id']} {t['bot_id']} {t['symbol']} qty={t['quantity']} entry={t['entry_price']} "
+              f"target={tgt} ltp={ltp} (at {t['last_tick']}) -> {'AT/ABOVE TARGET' if hit else 'below target'}")
+        print(f"  status={t['status']} bot={t['bot_status']} next_exit_at={t.get('next_exit_at')} "
+              f"exit_conditions=rsi>={t['exit_rsi_min'] or 0} vol>={t['exit_volume_min'] or 0}")
+        print(f"  bot last_error: {t['last_error'] or '-'}")
+        for o in db.rows("SELECT id, side, state, broker_order_id, submitted_at, reject_reason FROM orders "
+                         "WHERE lot_id=? ORDER BY id", (t["id"],)):
+            print(f"  SELL order #{o['id']} broker={o['broker_order_id']} state={o['state']} "
+                  f"sent={o['submitted_at']} reason={o['reject_reason'] or '-'}")
+    print("\nRecent exit events:")
+    for e in db.rows("SELECT ts, bot_id, kind, message FROM events WHERE kind LIKE '%EXIT%' OR kind LIKE '%SELL%' "
+                     "OR kind LIKE 'ORDER_%' OR kind LIKE '%SESSION%' ORDER BY id DESC LIMIT 15"):
+        print(f"  {e['ts']} {e['bot_id'] or ''} {e['kind']}: {e['message']}")
 
 
 def _show(title, rows, limit=5):
@@ -175,6 +204,7 @@ COMMANDS = {
     "worker-dry-run": cmd_worker_dry_run,
     "purge-paper": cmd_purge_paper,
     "candles-check": cmd_candles_check,
+    "exit-check": cmd_exit_check,
 }
 
 if __name__ == "__main__":
