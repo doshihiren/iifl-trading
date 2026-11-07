@@ -11,6 +11,7 @@ import uuid
 from flask import Blueprint, jsonify, render_template, request
 
 import swing
+import swing_live
 
 bp = Blueprint("swing_page", __name__)
 _jobs = {}
@@ -110,3 +111,48 @@ def job(job_id):
     if not j:
         return _err("Job not found (the web app may have restarted) – run again", 404)
     return jsonify({"status": "Ok", "result": {k: v for k, v in j.items() if k != "started"}})
+
+
+@bp.route("/iifl/api/swing/bot", methods=["GET"])
+def bot_overview():
+    return jsonify({"status": "Ok", "result": swing_live.overview()})
+
+
+@bp.route("/iifl/api/swing/bot", methods=["POST"])
+def bot_update():
+    body = request.get_json(silent=True) or {}
+    action = body.get("action")
+    try:
+        p = swing.params(body.get("params")) if body.get("params") else None
+        capital = float(body["capital"]) if body.get("capital") not in (None, "") else None
+        maxpos = int(float(body["max_positions"])) if body.get("max_positions") not in (None, "") else None
+    except (ValueError, TypeError) as e:
+        return _err(str(e))
+    mode = body.get("mode")
+    if mode is not None and mode not in ("LIVE", "PAPER"):
+        return _err("Mode must be LIVE or PAPER")
+    if capital is not None and capital < 1000:
+        return _err("Capital looks too small")
+    if maxpos is not None and not 1 <= maxpos <= 50:
+        return _err("Max stocks must be 1-50")
+    keep = ("sma_len", "rsi_len", "entry_rsi", "exit_rsi", "max_hold", "sl_mode", "sl_value", "min_price", "min_value_cr", "brokerage")
+    params = {k: p[k] for k in keep} if p else None
+    if action == "start":
+        cfg = swing_live.save_cfg(status="RUNNING", mode=mode, capital=capital, max_positions=maxpos, params=params)
+        swing.db.add_event("SWING_START", f"Swing auto-trading started ({cfg['mode']}, ₹{cfg['capital']:,.0f}, "
+                           f"{cfg['max_positions']} stocks)")
+    elif action == "stop":
+        cfg = swing_live.save_cfg(status="STOPPED")
+        swing.db.add_event("SWING_STOP", "Swing auto-trading: new buys stopped; open positions still exit automatically")
+    elif action == "save":
+        cfg = swing_live.save_cfg(capital=capital, max_positions=maxpos, params=params,
+                                  mode=mode if swing_live.get_cfg()["status"] != "RUNNING" else None)
+    else:
+        return _err("Unknown action")
+    # Settings changed: rebuild tomorrow's plan from the latest close (if data is ready).
+    try:
+        from datetime import datetime
+        swing_live.make_plan(datetime.now(swing_live.IST), force=True)
+    except Exception:  # noqa: BLE001
+        pass
+    return jsonify({"status": "Ok", "result": swing_live.overview()})

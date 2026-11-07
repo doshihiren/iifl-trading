@@ -217,6 +217,14 @@ class SwingSyncThread(threading.Thread):
             except Exception:
                 log.exception("event=SWING_SYNC_ERROR")
                 _put_state(state="ERROR", message="Download stopped by an error; it retries automatically.")
+            try:
+                import swing_live
+                now = datetime.now(IST)
+                swing_live.make_plan(now)
+                if now.minute % 10 == 0:
+                    swing_live.housekeeping()
+            except Exception:
+                log.exception("event=SWING_PLAN_ERROR")
             self.stop_event.wait(self.interval)
 
     def stop(self):

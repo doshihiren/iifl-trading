@@ -35,6 +35,7 @@ import config
 import db
 import market_calendar as cal
 import indicator_conditions
+import swing_live
 
 IST = ZoneInfo("Asia/Kolkata")
 log = logging.getLogger("iifl.engine")
@@ -239,6 +240,14 @@ class Engine:
         bots = db.rows("SELECT * FROM bots WHERE deleted=0")
         live_work = self._has_live_work(bots)
         any_work = live_work or self._has_paper_work(bots)
+        swing_due = False
+        try:
+            swing_due = swing_live.entries_due(now)
+        except Exception:
+            log.exception("event=SWING_CHECK_FAILED")
+        if swing_due:
+            any_work = True
+            live_work = live_work or swing_live.get_cfg()["mode"] == "LIVE"
 
         trading_day = cal.is_trading_day(now)
         after_hours_sync = trading_day and cal.parse_hhmm("09:00") <= now.time() < cal.parse_hhmm("16:00")
@@ -270,6 +279,17 @@ class Engine:
                         log.warning("event=RECON_FAILED error=%s", exc)
             if status != "OPEN":
                 return
+
+            if swing_due:
+                # Swing Scanner auto-trader: today's planned buys (own errors never stop other bots).
+                try:
+                    swing_live.execute(self, now)
+                except self.broker.SessionExpired:
+                    raise
+                except Exception as exc:
+                    log.exception("event=SWING_EXECUTE_FAILED")
+                    db.add_event("SWING_ERROR", f"Swing buys failed: {str(exc)[:200]}", level="ERROR")
+                bots = db.rows("SELECT * FROM bots WHERE deleted=0")
 
             active = [b for b in bots if self._bot_needs_tick(b)]
             instruments = sorted({(str(b["instrumentId"]), b["exchange"]) for b in active})
@@ -378,6 +398,8 @@ class Engine:
     # ---------- entries ----------
     def maybe_enter(self, bot, ltp, now):
         bot_id = bot["bot_id"]
+        if bot.get("strategy") == "SWING":
+            return                      # buys come from the Swing Scanner plan (swing_live.execute)
         slot = current_slot(bot["timeframe"], now)
         if not slot:
             return
@@ -600,6 +622,14 @@ class Engine:
                 nxt = _parse_ts(lot["next_exit_at"])
                 if nxt and now < nxt:
                     continue
+            if bot.get("strategy") == "SWING":
+                # Swing lots: sell when last evening's RSI / days-held check said so, or on the stop.
+                why = swing_live.exit_reason(lot, ltp)
+                if why:
+                    self.submit_exit(bot, lot, why, ltp, now)
+                elif exiting_bot:
+                    self.submit_exit(bot, lot, "MANUAL_EXIT", ltp, now)
+                continue
             target_hit = ltp >= float(lot["target_price"])
             if target_hit and _exit_conditions_on(bot):
                 # Target reached; the bot's exit RSI / volume condition must also match

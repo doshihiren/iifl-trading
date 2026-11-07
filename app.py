@@ -550,12 +550,16 @@ def _bot_summary(bot):
 
     # Read-only exit diagnostics for the dashboard. This never submits an order.
     open_lots = db.rows(
-        "SELECT id, status, target_price, next_exit_at, exit_order_id FROM trades "
+        "SELECT id, status, target_price, next_exit_at, exit_order_id, exit_signal FROM trades "
         "WHERE bot_id=? AND status IN ('OPEN','EXIT_SUBMITTED') ORDER BY id",
         (bot["bot_id"],))
     ltp = float(bot["last_ltp"]) if bot.get("last_ltp") not in (None, "") else None
-    target_matched = [t for t in open_lots if t["status"] == "OPEN" and ltp is not None
-                      and ltp >= float(t["target_price"])]
+    swing_bot = bot.get("strategy") == "SWING"
+    if swing_bot:
+        target_matched = [t for t in open_lots if t["status"] == "OPEN" and t.get("exit_signal")]
+    else:
+        target_matched = [t for t in open_lots if t["status"] == "OPEN" and ltp is not None
+                          and ltp >= float(t["target_price"])]
     sell_pending = int(db.scalar(
         f"SELECT COUNT(*) FROM orders WHERE bot_id=? AND side='SELL' "
         f"AND state IN ({','.join('?'*len(ACTIVE_ORDER_STATES))})",
@@ -565,11 +569,12 @@ def _bot_summary(bot):
     elif sell_pending:
         exit_check = f"{sell_pending} SELL order(s) pending at broker"
     elif target_matched:
-        exit_check = f"{len(target_matched)} target(s) matched"
+        exit_check = (f"Swing exit signal: {target_matched[0]['exit_signal']}" if swing_bot
+                      else f"{len(target_matched)} target(s) matched")
         if bot.get("last_error"):
             exit_check += f" • {bot['last_error']}"
     else:
-        exit_check = "Waiting for target"
+        exit_check = "Swing: holding until RSI exit / max days" if swing_bot else "Waiting for target"
         if bot.get("last_error") and ("Exit" in str(bot["last_error"]) or "sell" in str(bot["last_error"]).lower()):
             exit_check += f" • {bot['last_error']}"
     bot["exit_check"] = exit_check
@@ -1010,7 +1015,7 @@ def api_system():
             "broker_session": badge,
             "targets_waiting": db.scalar(
                 "SELECT COUNT(*) FROM trades t JOIN bots b ON b.bot_id=t.bot_id "
-                "WHERE t.mode='LIVE' AND t.status='OPEN' AND b.last_ltp IS NOT NULL "
+                "WHERE t.mode='LIVE' AND t.status='OPEN' AND b.last_ltp IS NOT NULL AND b.strategy!='SWING' "
                 "AND b.last_ltp >= t.target_price") or 0,
             "session_detail": session_state.get("detail"),
             "session_checked_at": session_state.get("checked_at"),

@@ -106,6 +106,22 @@
     </div>
   </div>
 
+  <div class="card" id="botCard">
+    <h2><span class="step">3</span>🤖 Auto-trading <span class="tag" id="botBadge" style="margin-left:8px">…</span></h2>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,max-content))">
+      <div class="f"><label>Mode</label><select id="botMode"><option value="LIVE">LIVE (real orders)</option><option value="PAPER">PAPER (practice)</option></select></div>
+      <div class="f"><label>&nbsp;</label><button class="go" id="botStart" onclick="botAction('start')">▶ Start auto-trading</button></div>
+      <div class="f"><label>&nbsp;</label><button class="secondary" id="botStop" onclick="botAction('stop')">⏸ Stop new buys</button></div>
+      <div class="f"><label>&nbsp;</label><button class="secondary" id="botSave" onclick="botAction('save')">💾 Use current settings</button></div>
+    </div>
+    <div class="meta" id="botDiff" style="margin-top:8px"></div>
+    <div class="kv" id="botKv" style="margin-top:12px"></div>
+    <div id="botPlan"></div>
+    <div id="botPos"></div>
+    <p class="note" style="margin-top:12px">Uses the capital, max stocks and strategy settings from step 2. Every evening after the 5:30 PM data update the bot decides tomorrow's buys and sells; at 9:15 it places them as market orders and records the actual fill price.
+      Positions are sold at the next open after RSI closes above the exit level or the max days pass (or at once if a stop loss is set and hit). <b>Stop new buys</b> never abandons open positions – they still exit automatically. Each stock also appears on the dashboard as a bot named SW-&lt;SYMBOL&gt;. Keep IIFL logged in every morning before 9:15.</p>
+  </div>
+
   <div class="card">
     <div class="seg" style="margin-bottom:14px"><button id="tabScan" class="on" onclick="tab('scan')">🎯 Today's signals</button><button id="tabBt" onclick="tab('bt')">📈 Backtest</button></div>
 
@@ -299,7 +315,51 @@ function line(id,pts,color,fmt,extra,base,H=220){
     tip.innerHTML=`${fmtD(pts[i].d)}<br><b>${fmt(pts[i].v)}</b>${extra?'<br>'+extra(pts[i]):''}`;tip.style.opacity=1;tip.style.left=(ev.pageX+12)+'px';tip.style.top=(ev.pageY-10)+'px'};
   svg.onmouseleave=()=>{tip.style.opacity=0;hl.setAttribute('opacity',0)};
 }
-loadStatus().then(s=>{if(s&&s.with_data)runScan()});
+// ---------- auto-trading ----------
+let BOT=null;
+const BOT_KEYS=['entry_rsi','exit_rsi','max_hold','sma_len','rsi_len','sl_mode','sl_value','min_price','min_value_cr','capital','max_positions','brokerage'];
+function botDiff(){if(!BOT)return [];const p=BOT.config.params,cur=params();
+  return BOT_KEYS.filter(k=>String(p[k])!==String(cur[k])&&!(Number(p[k])===Number(cur[k])&&cur[k]!==''))}
+async function loadBot(){
+  try{BOT=await api('/iifl/api/swing/bot')}catch(e){$('botKv').innerHTML='<p class="err">'+esc(e.message)+'</p>';return}
+  renderBot();
+}
+function renderBot(){
+  const b=BOT,c=b.config,run=c.status==='RUNNING';
+  $('botBadge').textContent=run?(c.mode+' • RUNNING'):'STOPPED';$('botBadge').style.background=run?(c.mode==='LIVE'?'#1d5e3f':'#24365e'):'#3a2a2a';
+  $('botMode').value=c.mode;$('botMode').disabled=run;
+  $('botStart').parentElement.style.display=run?'none':'';$('botStop').parentElement.style.display=run?'':'none';
+  const diff=botDiff();
+  $('botDiff').innerHTML=diff.length&&(run||b.positions.length)?`<span class="warn">Settings on this page differ from the bot (${diff.join(', ')}). Click “Use current settings” to apply them.</span>`:'';
+  $('botKv').innerHTML=`<div><span>Capital • max stocks</span><b>${inr(c.capital)} • ${c.max_positions}</b></div>
+    <div><span>Invested now</span><b>${inr(b.deployed)}</b></div><div><span>Open positions</span><b>${b.positions.length}</b></div>
+    <div><span>Closed trades (${c.mode})</span><b>${b.closed.trades} • ${b.closed.trades?Math.round(100*b.closed.wins/b.closed.trades):0}% wins</b></div>
+    <div><span>Realised P&amp;L</span><b class="${cls(b.closed.pnl)}">${inr(b.closed.pnl)}</b></div>
+    ${c.mode==='LIVE'&&!b.live_enabled?'<div><span>Warning</span><b class="warn">LIVE off in .env</b></div>':''}`;
+  const pl=b.plan||{};
+  const st={PLANNED:'⏳ planned',ORDERED:'✅ ordered',SKIPPED:'⏭ skipped'};
+  $('botPlan').innerHTML=pl.day?`<h3 style="margin:16px 0 8px">Plan for ${fmtD(pl.day)} 9:15 <span class="meta">(from the close of ${fmtD(pl.based_on)})</span>${!run&&pl.entries&&pl.entries.length?' <span class="warn">– bot stopped, buys will not be placed</span>':''}</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
+      <div><b class="pos">Buy</b>${pl.entries&&pl.entries.length?`<table><tr><th>Stock</th><th class="num">RSI</th><th class="num">Close</th><th>Status</th></tr>${pl.entries.map(e=>`<tr><td><b>${esc(e.symbol)}</b></td><td class="num">${e.rsi}</td><td class="num">${n2(e.close)}</td><td>${st[e.status]||esc(e.status)} <span class="meta">${esc(e.detail||'')}</span></td></tr>`).join('')}</table>`:'<p class="empty">No buys</p>'}
+        ${pl.extra&&pl.extra.length?`<p class="meta">No free slot for: ${pl.extra.map(e=>esc(e.symbol)).join(', ')}</p>`:''}</div>
+      <div><b class="neg">Sell</b>${pl.exits&&pl.exits.length?`<table><tr><th>Stock</th><th class="num">Qty</th><th>Why</th></tr>${pl.exits.map(x=>`<tr><td><b>${esc(x.symbol)}</b></td><td class="num">${x.qty}</td><td>${esc(x.reason)}</td></tr>`).join('')}</table>`:'<p class="empty">No sells</p>'}</div>
+    </div>`:'<p class="meta" style="margin-top:12px">No plan yet – it is made automatically each evening after the data update (needs the daily data from step 1).</p>';
+  $('botPos').innerHTML=b.positions.length?`<h3 style="margin:16px 0 8px">Open swing positions</h3><div class="scroll"><table><tr><th>Stock</th><th>Bought</th><th class="num">Qty</th><th class="num">Buy</th><th class="num">Last</th><th class="num">P&amp;L</th><th class="num">Stop</th><th>Next step</th></tr>
+    ${b.positions.map(x=>`<tr><td><b>${esc(x.symbol)}</b> <span class="meta">${x.mode}</span></td><td>${fmtD(x.bought)}</td><td class="num">${x.qty}</td><td class="num">${n2(x.entry)}</td><td class="num">${n2(x.ltp)}</td><td class="num ${cls(x.pnl)}">${inr(x.pnl)}</td><td class="num">${n2(x.stop)}</td>
+      <td>${x.status==='EXIT_SUBMITTED'?'SELL order sent':(x.exit_signal?'Sell at next open: '+esc(x.exit_signal):'Hold – waiting for RSI exit')}${x.error?` <span class="meta">${esc(x.error)}</span>`:''}</td></tr>`).join('')}</table></div>`:'';
+}
+async function botAction(action){
+  const p=params(),mode=$('botMode').value;
+  if(action==='start'){
+    const msg=mode==='LIVE'?`Start LIVE swing auto-trading?\n\nCapital ${inr(p.capital)} across ${p.max_positions} stocks. REAL market orders will be placed at 9:15 on trading days, without asking.`:`Start PAPER swing trading with ${inr(p.capital)} across ${p.max_positions} stocks?`;
+    if(!confirm(msg))return;
+  }
+  if(action==='stop'&&!confirm('Stop new buys? Open positions will still be sold automatically.'))return;
+  try{BOT=await post('/iifl/api/swing/bot',{action,mode,capital:p.capital,max_positions:p.max_positions,params:p});renderBot()}catch(e){alert(e.message)}
+}
+FIELDS.forEach(k=>$(k).addEventListener('change',()=>BOT&&renderBot()));
+setInterval(loadBot,30000);
+loadStatus().then(s=>{loadBot();if(s&&s.with_data)runScan()});
 </script>
 <style>@media(max-width:800px){.btgrid{grid-template-columns:1fr!important}.kv{grid-template-columns:1fr 1fr}}</style>
 </body>

@@ -365,6 +365,11 @@ LATER_COLUMNS = [
     ("bots", "rebuy_trigger_price", "REAL"),
     ("orders", "batch_no", "INTEGER"),
     ("trades", "exit_note", "TEXT"),
+    # Swing Scanner auto-trader: one bot row per stock (strategy='SWING'); exits come from
+    # the evening RSI / days-held check (exit_signal) or an optional stop price.
+    ("bots", "strategy", "TEXT NOT NULL DEFAULT ''"),
+    ("trades", "exit_signal", "TEXT"),
+    ("trades", "stop_price", "REAL"),
 ]
 
 
