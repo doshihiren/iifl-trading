@@ -85,7 +85,7 @@
       <div class="f"><label>History to download</label><select id="years"><option value="2">2 years</option><option value="3" selected>3 years (recommended)</option><option value="5">5 years</option></select></div>
       <div class="f"><label>&nbsp;</label><button class="go" id="dlBtn" onclick="download()">⬇ Download NSE daily data</button></div>
     </div>
-    <p class="meta" style="margin-top:10px">First download takes about 20–40 minutes for ~2000 stocks and runs in the background on the server – you can close this page. After that, each new day is added automatically after 5:30 PM. Needs a valid IIFL login (dashboard).</p>
+    <p class="meta" style="margin-top:10px">The first download makes about one IIFL request per second (≈ 2 hours for ~2000 stocks, one time) and runs in the background after 4 PM, never during market hours – you can close this page. After that, each evening after 5:30 PM only the new day is added (≈ 1 request per liquid stock). Needs a valid IIFL login (dashboard).</p>
   </div>
 
   <div class="card">
@@ -187,9 +187,9 @@ async function loadStatus(){
   const s=status;
   $('dataKv').innerHTML=`<div><span>Stocks in NSE list</span><b>${s.stocks||0}</b></div><div><span>Stocks with data</span><b>${s.with_data||0}</b></div>
     <div><span>Data from</span><b>${fmtD(s.first_day)}</b></div><div><span>Latest day</span><b>${fmtD(s.last_day)}</b></div>
-    <div><span>Download status</span><b class="${s.state==='DONE'?'pos':(s.state==='WAITING_LOGIN'||s.state==='ERROR'?'warn':'')}">${esc({RUNNING:'Downloading',QUEUED:'Starting…',DONE:'Up to date',WAITING_LOGIN:'Needs IIFL login',ERROR:'Error, retrying'}[s.state]||'Not started')}</b></div>
+    <div><span>Download status</span><b class="${s.state==='DONE'?'pos':(s.state==='WAITING_LOGIN'||s.state==='ERROR'?'warn':'')}">${esc({RUNNING:'Downloading',QUEUED:'Queued',PAUSED:'Paused (IIFL limit)',DONE:'Up to date',WAITING_LOGIN:'Needs IIFL login',ERROR:'Error, retrying'}[s.state]||'Not started')}</b></div>
     <div><span>Stocks that failed</span><b>${s.failed||0}</b></div>`;
-  const running=s.state==='RUNNING'||s.state==='QUEUED';
+  const running=s.state==='RUNNING'||s.state==='QUEUED'||s.state==='PAUSED';
   $('syncBarWrap').style.display=running?'':'none';
   if(s.total)$('syncBar').style.width=Math.round(100*(s.done||0)/s.total)+'%';
   $('syncMsg').textContent=(s.message||'')+(running&&s.total?` – ${Math.round(100*(s.done||0)/s.total)}%`:'');

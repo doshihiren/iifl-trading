@@ -30,7 +30,11 @@ log = logging.getLogger("iifl.swing")
 IST = candle_util.IST
 
 DAILY_SYNC_AT = "17:30"
-REQUEST_PAUSE = 0.35          # seconds between IIFL calls
+REQUEST_PAUSE = 1.1           # seconds between IIFL calls (stays under 1 request/second)
+MARKET_QUIET = ("09:00", "16:00")   # no bulk downloads while the market is open (live bots need the API)
+DAILY_MIN_VALUE_CR = 2.0      # daily top-up skips stocks trading under ₹2 Cr/day (all stocks refreshed on Fridays)
+THROTTLE_WAIT = 60            # seconds to wait after a "too many requests" reply
+THROTTLE_PAUSE_MIN = 30       # pause the whole download this long if IIFL keeps throttling
 CHUNK_DAYS = 370              # calendar days per history request (split on error)
 STATE_KEY = "swing_sync"
 
@@ -117,7 +121,16 @@ def _fetch_range(iid, d_from, d_to, fetch, pause):
     return out
 
 
-def _fetch_chunk(iid, a, b, fetch, pause):
+class Throttled(RuntimeError):
+    pass
+
+
+def _is_throttle(exc):
+    text = str(exc).lower()
+    return "429" in text or "too many" in text or "rate limit" in text or "throttl" in text
+
+
+def _fetch_chunk(iid, a, b, fetch, pause, _retry=True):
     import broker
     try:
         rows = fetch(iid, a, b)
@@ -126,7 +139,13 @@ def _fetch_chunk(iid, a, b, fetch, pause):
         return rows
     except broker.SessionExpired:
         raise
-    except Exception:
+    except Exception as exc:
+        if _is_throttle(exc):
+            if not _retry:
+                raise Throttled(str(exc)) from exc
+            log.warning("event=SWING_THROTTLED waiting=%ss error=%s", THROTTLE_WAIT, exc)
+            time.sleep(THROTTLE_WAIT if pause else 0)
+            return _fetch_chunk(iid, a, b, fetch, pause, _retry=False)
         if (b - a).days < 31:
             raise
         mid = a + timedelta(days=(b - a).days // 2)
@@ -159,6 +178,21 @@ def run_sync(now, fetch=iifl_fetch_daily, pause=REQUEST_PAUSE, contracts=None, f
                  and now.strftime("%H:%M") >= DAILY_SYNC_AT and st.get("synced_to") != last_day.isoformat())
     if not (requested or daily_due or force):
         return None
+    if st.get("resume_after") and db.now_utc() < st["resume_after"] and not force:
+        return None
+    if (cal.is_trading_day(now) and cal.parse_hhmm(MARKET_QUIET[0]) <= now.time() < cal.parse_hhmm(MARKET_QUIET[1])
+            and not force):
+        if requested and st.get("state") != "QUEUED_MARKET":
+            _put_state(state="QUEUED", message="Starts after 4:00 PM so live trading keeps the IIFL API to itself.")
+        return None
+    skip_illiquid = set()
+    if not requested and not force and now.weekday() != 4:
+        since = (last_day - timedelta(days=35)).isoformat()
+        liquid = {r["instrumentId"] for r in db.rows(
+            "SELECT instrumentId FROM daily_candles WHERE d>=? GROUP BY instrumentId HAVING AVG(close*volume)>=?",
+            (since, DAILY_MIN_VALUE_CR * 1e7))}
+        known = {r["instrumentId"] for r in db.rows("SELECT DISTINCT instrumentId FROM daily_candles WHERE d>=?", (since,))}
+        skip_illiquid = known - liquid
     if requested or not db.scalar("SELECT COUNT(*) FROM swing_universe"):
         n = build_universe(contracts)
         log.info("event=SWING_UNIVERSE stocks=%s", n)
@@ -166,7 +200,7 @@ def run_sync(now, fetch=iifl_fetch_daily, pause=REQUEST_PAUSE, contracts=None, f
     start_default = (last_day - timedelta(days=int(years * 365.25))).isoformat()
     stocks = db.rows("SELECT * FROM swing_universe ORDER BY symbol")
     total = len(stocks)
-    _put_state(state="RUNNING", requested=False, total=total, done=0, errors=0, started=db.now_utc(),
+    _put_state(state="RUNNING", requested=False, resume_after=None, total=total, done=0, errors=0, started=db.now_utc(),
                message=f"Downloading daily candles for {total} NSE stocks…")
     errors = 0
     for i, s in enumerate(stocks):
@@ -179,7 +213,7 @@ def run_sync(now, fetch=iifl_fetch_daily, pause=REQUEST_PAUSE, contracts=None, f
             oldest = db.scalar("SELECT MIN(d) FROM daily_candles WHERE instrumentId=?", (s["instrumentId"],))
             if oldest and oldest > start_default:
                 d_from = date.fromisoformat(start_default)
-        if d_from <= last_day:
+        if d_from <= last_day and s["instrumentId"] not in skip_illiquid:
             try:
                 rows = _fetch_range(s["instrumentId"], d_from, last_day, fetch, pause)
                 _store(s["instrumentId"], rows, last_day)
@@ -190,6 +224,14 @@ def run_sync(now, fetch=iifl_fetch_daily, pause=REQUEST_PAUSE, contracts=None, f
                 _put_state(state="WAITING_LOGIN", requested=True, done=i,
                            message="IIFL login expired – log in on the dashboard and the download continues.")
                 return "session"
+            except Throttled:
+                resume = (datetime.now(IST) + timedelta(minutes=THROTTLE_PAUSE_MIN)).astimezone(
+                    __import__("datetime").timezone.utc).isoformat()
+                _put_state(state="PAUSED", requested=True, done=i, resume_after=resume,
+                           message=f"IIFL asked us to slow down – download paused {THROTTLE_PAUSE_MIN} min, then continues.")
+                db.add_event("SWING_THROTTLED", "IIFL rate limit reached during daily-candle download; paused",
+                             level="WARNING")
+                return "throttled"
             except Exception as exc:  # noqa: BLE001
                 errors += 1
                 with db.tx() as c:

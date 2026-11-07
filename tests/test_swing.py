@@ -17,6 +17,8 @@ os.environ.update({
     "BOT_DATA_FILE": os.path.join(_TMP, "bots.json"),
 })
 
+DB_PATH = os.environ["BOT_DB_FILE"]
+
 import broker  # noqa: E402
 import config  # noqa: E402
 import db  # noqa: E402
@@ -64,7 +66,7 @@ def uptrend_with_dip(n_up=230, dip=6, rec=12, step=0.02):
 class Base(unittest.TestCase):
     def setUp(self):
         db.reset_connection()
-        config.BOT_DB_FILE = os.environ["BOT_DB_FILE"]
+        config.BOT_DB_FILE = DB_PATH
         config.DATA_DIR = _TMP
         config.HOLIDAYS_FILE = os.path.join(_TMP, "holidays.json")
         db._initialized_paths.clear()
@@ -104,7 +106,7 @@ class TestSync(Base):
             calls.append((iid, a, b))
             if (b - a).days > 200:
                 raise RuntimeError("range too large")
-            return [{"d": d, "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100}
+            return [{"d": d, "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 10_000_000}
                     for d in days(400, date(2023, 1, 2)) if a.isoformat() <= d <= b.isoformat()]
 
         swing.request_download(1)
@@ -238,6 +240,46 @@ class TestPage(Base):
         self.assertEqual(j["status"], "done", j.get("error"))
         self.assertEqual(j["result"]["summary"]["trades"], 1)
         self.assertEqual(cl.get("/iifl/swing").status_code, 200)
+
+
+class TestApiFriendly(Base):
+    def setUp(self):
+        super().setUp()
+        self.calls = []
+
+    def fetch(self, iid, a, b):
+        self.calls.append(iid)
+        return [{"d": d, "open": 10, "high": 11, "low": 9, "close": 10, "volume": 1000 if iid == "2" else 10_000_000}
+                for d in days(400, date(2023, 1, 2)) if a.isoformat() <= d <= b.isoformat()]
+
+    def test_no_download_during_market_hours(self):
+        swing.request_download(1)
+        self.assertIsNone(swing.run_sync(datetime(2024, 3, 6, 11, 0, tzinfo=IST), fetch=self.fetch, pause=0,
+                                         contracts=CONTRACTS))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(swing.run_sync(datetime(2024, 3, 6, 16, 5, tzinfo=IST), fetch=self.fetch, pause=0,
+                                        contracts=CONTRACTS), "done")
+
+    def test_daily_skips_illiquid_except_friday(self):
+        swing.request_download(1)
+        swing.run_sync(datetime(2024, 3, 5, 18, 0, tzinfo=IST), fetch=self.fetch, pause=0, contracts=CONTRACTS)
+        self.calls.clear()
+        swing.run_sync(datetime(2024, 3, 6, 17, 45, tzinfo=IST), fetch=self.fetch, pause=0)     # Wednesday
+        self.assertEqual(self.calls, ["1"])
+        self.calls.clear()
+        swing.run_sync(datetime(2024, 3, 8, 17, 45, tzinfo=IST), fetch=self.fetch, pause=0)     # Friday: all
+        self.assertEqual(sorted(self.calls), ["1", "2"])
+
+    def test_throttle_pauses_download(self):
+        def limited(iid, a, b):
+            raise RuntimeError("HTTP 429: Too Many Requests")
+        swing.request_download(1)
+        r = swing.run_sync(datetime(2024, 3, 6, 18, 0, tzinfo=IST), fetch=limited, pause=0, contracts=CONTRACTS)
+        self.assertEqual(r, "throttled")
+        st = swing.get_state()
+        self.assertEqual((st["state"], st["requested"]), ("PAUSED", True))
+        self.assertIsNone(swing.run_sync(datetime(2024, 3, 6, 18, 1, tzinfo=IST), fetch=self.fetch, pause=0))
+        self.assertEqual(self.calls, [])                       # waits out the pause
 
 
 if __name__ == "__main__":
