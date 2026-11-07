@@ -1226,6 +1226,10 @@ app.register_blueprint(technical_summary.bp)
 import strategy_lab  # noqa: E402
 app.register_blueprint(strategy_lab.bp)
 
+import swing_page  # noqa: E402
+
+app.register_blueprint(swing_page.bp)
+
 
 if __name__ == "__main__":
 

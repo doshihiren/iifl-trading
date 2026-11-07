@@ -6,6 +6,7 @@
     python tools.py broker-check      read-only: session, order book, trade book, positions, holdings
     python tools.py worker-dry-run    run one engine cycle in the foreground (stop the service first)
     python tools.py exit-check        why each open LIVE trade has (or has not) been sold
+    python tools.py swing-check SBC   show IIFL's daily-candle reply (Swing Scanner) for one stock
     python tools.py candles-check SBC show IIFL's raw 1-minute candle reply for the last trading day
     python tools.py purge-paper       show what PAPER data would be deleted
     python tools.py purge-paper --yes back up the database, then delete all PAPER bots/trades/orders
@@ -151,6 +152,25 @@ def cmd_candles_check():
         print("last: ", parsed[-1])
 
 
+def cmd_swing_check():
+    from datetime import date, timedelta
+
+    import broker
+    import swing
+    from instruments import find_instrument
+    symbol = sys.argv[2] if len(sys.argv) > 2 else "SBC"
+    inst = find_instrument(symbol)
+    try:
+        rows = swing.iifl_fetch_daily(inst["instrumentId"], date.today() - timedelta(days=400), date.today())
+    except broker.SessionExpired:
+        print("IIFL session is not valid. Open the dashboard, click 'Login to IIFL', then run this again.")
+        return
+    print(f"{symbol}: {len(rows)} daily candles")
+    for r in rows[:2] + rows[-3:]:
+        print(" ", r["d"], "O", r["open"], "H", r["high"], "L", r["low"], "C", r["close"], "V", r["volume"])
+    print("Swing data status:", json.dumps(swing.data_status(), default=str))
+
+
 def cmd_purge_paper():
     import os
     import sqlite3
@@ -205,6 +225,7 @@ COMMANDS = {
     "purge-paper": cmd_purge_paper,
     "candles-check": cmd_candles_check,
     "exit-check": cmd_exit_check,
+    "swing-check": cmd_swing_check,
 }
 
 if __name__ == "__main__":

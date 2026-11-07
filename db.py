@@ -159,6 +159,21 @@ CREATE TABLE IF NOT EXISTS analysis_symbols (
     updated_at    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS daily_candles (
+    instrumentId TEXT NOT NULL,
+    d            TEXT NOT NULL,
+    open REAL, high REAL, low REAL, close REAL, volume INTEGER,
+    PRIMARY KEY (instrumentId, d)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS swing_universe (
+    instrumentId    TEXT PRIMARY KEY,
+    symbol          TEXT NOT NULL,
+    exchange        TEXT NOT NULL DEFAULT 'NSEEQ',
+    tick_size       REAL,
+    last_synced_day TEXT,
+    error           TEXT,
+    updated_at      TEXT
+);
 CREATE TABLE IF NOT EXISTS runtime_state (
     key        TEXT PRIMARY KEY,
     value      TEXT,

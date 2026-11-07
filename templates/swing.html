@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Swing Scanner</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#121a2e;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--grid:#1d2842;--blue:#6ea8fe;
+      --sA:#3987e5;--sB:#d95926;--sC:#199e70;--sD:#c98500;--sE:#d55181;--good:#32d583;--bad:#ff6b6b}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#08101f,#0f1730);font-family:Inter,system-ui,Arial,sans-serif;color:var(--text)}
+    .wrap{max-width:1440px;margin:auto;padding:24px 18px 60px}
+    .top{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap}
+    h1{font-size:26px;margin:0 0 4px}.sub{color:var(--muted);margin:0;font-size:14px}
+    .nav{display:flex;gap:14px;flex-wrap:wrap}.nav a{color:var(--blue);text-decoration:none;font-weight:700;font-size:14px}
+    .card{background:rgba(18,26,46,.95);border:1px solid var(--line);border-radius:18px;padding:18px 20px;margin-bottom:16px}
+    h2{font-size:17px;margin:0 0 14px}h3{font-size:15px;margin:0}
+    .step{display:inline-block;background:#24365e;color:#cfe0ff;border-radius:999px;width:24px;height:24px;text-align:center;line-height:24px;font-size:13px;margin-right:8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end}
+    .f{display:flex;flex-direction:column;gap:6px;min-width:0}.f label{font-size:11px;color:var(--muted)}
+    .hint{font-size:11px;color:#b9d2ff;min-height:14px}
+    input,select{width:100%;background:#0d1528;color:var(--text);border:1px solid #30405f;border-radius:10px;padding:9px 11px;font-size:13px;outline:none;color-scheme:dark}
+    input[type=checkbox]{width:auto;accent-color:#6ea8fe}
+    input:focus,select:focus{border-color:var(--blue)}
+    button{border:0;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer;font-size:13px}
+    .go{background:var(--good);color:#052718}.secondary{background:#202d49;color:var(--text)}.ghost{background:transparent;color:var(--blue);padding:6px 4px}
+    .btn-sm{padding:6px 10px;font-size:12px;border-radius:8px}
+    details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-top:12px}
+    .strats{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px}
+    .sc{background:#0d1528;border:1px solid var(--line);border-radius:14px;padding:14px;border-top:4px solid var(--c)}
+    .sc .head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+    .sc .desc{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px;min-height:54px}
+    .sc .grid{grid-template-columns:1fr 1fr;gap:10px}
+    .tag{font-size:10px;font-weight:800;padding:3px 7px;border-radius:999px;background:#202d49;color:#c9d6f2}
+    .chk{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;cursor:pointer}
+    table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+    th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+    th{color:var(--muted);font-weight:600;position:sticky;top:0;background:#121a2e}
+    td.num,th.num{text-align:right}.scroll{overflow:auto;max-height:520px}
+    .meta{color:var(--muted);font-size:12px}.pos{color:var(--good)}.neg{color:var(--bad)}.err{color:#ff9da4}.warn{color:#ffd98a}
+    .cmp td.best{background:rgba(50,213,131,.12);font-weight:700}
+    .cmp th.grp{text-align:center;border-bottom:2px solid var(--c)}
+    .cmp td.chk-col{background:rgba(110,168,254,.05)}
+    .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:6px}
+    .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+    .kv div{background:#0d1528;border:1px solid var(--line);border-radius:12px;padding:11px}.kv b{display:block;font-size:18px}.kv span{color:var(--muted);font-size:11px}
+    .chart{position:relative;width:100%}.chart svg{display:block;width:100%}
+    .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:-4px 0 8px}.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+    .tip{position:absolute;pointer-events:none;background:#0a1122;border:1px solid #33456b;border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.6;opacity:0;white-space:nowrap;z-index:5}
+    .seg{display:inline-flex;border:1px solid #30405f;border-radius:10px;overflow:hidden}.seg button{background:transparent;color:var(--muted);border-radius:0;padding:7px 12px;font-weight:600}.seg button.on{background:#24365e;color:#fff}
+    .verdict{font-size:14px;line-height:1.6;background:#0c1426;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+    .chips{display:flex;flex-wrap:wrap;gap:8px}.chip{background:#0d1528;border:1px solid var(--line);border-radius:999px;padding:6px 11px;font-size:12px}
+    .bar{height:8px;background:#0d1528;border-radius:99px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:var(--blue);width:0}
+    .note{font-size:12px;color:#aeb9d1;background:#0c1426;border:1px solid var(--line);padding:11px 13px;border-radius:10px;line-height:1.6}
+    .empty{color:var(--muted);text-align:center;padding:22px}
+    #results,#optBox{display:none}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>📡 Swing Scanner</h1><p class="sub">200 SMA + RSI(10) mean reversion • scans every NSE stock daily • backtest on real IIFL data</p></div>
+    <div class="nav"><a href="/iifl/strategy-lab">🧪 Strategy Lab</a><a href="/iifl/analysis">🔬 Analysis</a><a href="/iifl/reports">📊 Reports</a><a href="/iifl/">← Dashboard</a></div>
+  </div>
+
+  <div class="card">
+    <h2>How the strategy works</h2>
+    <div class="chips">
+      <span class="chip">① Trend: close above <b id="rSma">200</b>-day SMA</span>
+      <span class="chip">② Dip: RSI(<b id="rRsiLen">10</b>) closes below <b id="rEntry">30</b></span>
+      <span class="chip">③ BUY next day at the open</span>
+      <span class="chip">④ Exit when RSI closes above <b id="rExit">40</b> or after <b id="rHold">10</b> days</span>
+      <span class="chip">⑤ SELL next day at the open</span>
+      <span class="chip" id="rSl">Stop loss: off</span>
+    </div>
+    <p class="note" style="margin-top:12px">Daily (swing) strategy, DELIVERY. Signals use the day's closing candle, so check this page in the evening (after 5:30 PM the data updates automatically) and place the buys at next morning's open.
+      The video's own 1-year test claimed 46 trades, 78% wins, +34.8% and −11.6% max drawdown. Use the Backtest tab to check those claims on your own data before putting money on it.</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">1</span>NSE daily data</h2>
+    <div class="kv" id="dataKv"></div>
+    <div class="bar" id="syncBarWrap" style="display:none"><i id="syncBar"></i></div>
+    <div class="meta" id="syncMsg"></div>
+    <div class="grid" style="margin-top:12px;grid-template-columns:repeat(auto-fit,minmax(200px,max-content))">
+      <div class="f"><label>History to download</label><select id="years"><option value="2">2 years</option><option value="3" selected>3 years (recommended)</option><option value="5">5 years</option></select></div>
+      <div class="f"><label>&nbsp;</label><button class="go" id="dlBtn" onclick="download()">⬇ Download NSE daily data</button></div>
+    </div>
+    <p class="meta" style="margin-top:10px">First download takes about 20–40 minutes for ~2000 stocks and runs in the background on the server – you can close this page. After that, each new day is added automatically after 5:30 PM. Needs a valid IIFL login (dashboard).</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span>Settings <button class="ghost btn-sm" onclick="resetDefaults()">↺ video settings</button></h2>
+    <div class="grid">
+      <div class="f"><label>Buy when RSI below</label><input type="number" id="entry_rsi" step="1"></div>
+      <div class="f"><label>Sell when RSI above</label><input type="number" id="exit_rsi" step="1"></div>
+      <div class="f"><label>Max days in a trade</label><input type="number" id="max_hold" step="1"><div class="hint">0 = no time exit</div></div>
+      <div class="f"><label>Trend SMA length (days)</label><input type="number" id="sma_len" step="1"></div>
+      <div class="f"><label>RSI length</label><input type="number" id="rsi_len" step="1"></div>
+      <div class="f"><label>Stop loss</label><select id="sl_mode"><option value="none">Off (like the original)</option><option value="pct">% below buy price</option><option value="atr">ATR(14) × value</option></select></div>
+      <div class="f"><label>Stop loss value</label><input type="number" id="sl_value" step="0.1"><div class="hint" id="slHint"></div></div>
+      <div class="f"><label>Min share price ₹</label><input type="number" id="min_price" step="1"></div>
+      <div class="f"><label>Min avg daily turnover ₹ crore</label><input type="number" id="min_value_cr" step="1"><div class="hint">20-day average; skips illiquid stocks</div></div>
+      <div class="f"><label>Capital ₹</label><input type="number" id="capital" step="10000"></div>
+      <div class="f"><label>Max stocks held at once</label><input type="number" id="max_positions" step="1"><div class="hint" id="slotHint"></div></div>
+      <div class="f"><label>Brokerage ₹ per order</label><input type="number" id="brokerage" step="1"><div class="hint">STT, stamp, exchange fees, GST added automatically</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="seg" style="margin-bottom:14px"><button id="tabScan" class="on" onclick="tab('scan')">🎯 Today's signals</button><button id="tabBt" onclick="tab('bt')">📈 Backtest</button></div>
+
+    <div id="paneScan">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="go" id="scanBtn" onclick="runScan()">🔍 Scan all NSE stocks</button><span class="meta" id="scanMeta"></span></div>
+      <div class="bar" id="scanBarWrap" style="display:none"><i id="scanBar"></i></div>
+      <div id="scanOut"></div>
+    </div>
+
+    <div id="paneBt" style="display:none">
+      <div class="grid">
+        <div class="f"><label>From</label><input type="date" id="btFrom"></div>
+        <div class="f"><label>To</label><input type="date" id="btTo"></div>
+        <div class="f"><label>Stocks</label><select id="universe" onchange="document.getElementById('symBox').style.display=this.value==='list'?'':'none'"><option value="all">All liquid NSE stocks (scanner)</option><option value="list">Only these stocks…</option></select></div>
+        <div class="f" id="symBox" style="display:none"><label>Symbols (comma separated)</label><input id="symbols" placeholder="HDFCBANK, RELIANCE, SBC"></div>
+        <div class="f"><label>&nbsp;</label><button class="go" id="btBtn" onclick="runBt()">▶ Run backtest</button></div>
+      </div>
+      <div class="hint" style="margin-top:6px">Quick periods: <button class="ghost btn-sm" onclick="period(6)">6 months</button><button class="ghost btn-sm" onclick="period(12)">1 year</button><button class="ghost btn-sm" onclick="period(24)">2 years</button><button class="ghost btn-sm" onclick="period(0)">all data</button></div>
+      <div class="bar" id="btBarWrap" style="display:none"><i id="btBar"></i></div>
+      <div class="meta" id="btMeta"></div>
+      <div id="btOut"></div>
+    </div>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+async function readJson(r){const t=await r.text();try{return JSON.parse(t)}catch(e){throw new Error('Server error (HTTP '+r.status+'). The web service may be restarting – try again in a minute.')}}
+async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){location.href='/iifl/auth/login';throw new Error('login')}const d=await readJson(r);if(!r.ok)throw new Error(d.message||'Request failed');return d.result}
+const post=(url,body)=>api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+const $=id=>document.getElementById(id);
+const inr=v=>v==null?'–':'₹'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:0});
+const n2=v=>v==null?'–':Number(v).toLocaleString('en-IN',{maximumFractionDigits:2});
+const pct=v=>v==null?'–':(v>0?'+':'')+Number(v).toFixed(2)+'%';
+const cls=v=>v>0?'pos':(v<0?'neg':'');
+const fmtD=d=>d?new Date(d+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'–';
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const FIELDS=['entry_rsi','exit_rsi','max_hold','sma_len','rsi_len','sl_mode','sl_value','min_price','min_value_cr','capital','max_positions','brokerage'];
+let DEF={}, status={};
+
+function loadSettings(){let saved={};try{saved=JSON.parse(localStorage.getItem('swingSettings')||'{}')}catch(e){}
+  FIELDS.forEach(k=>{$(k).value=saved[k]??DEF[k]});refreshRules()}
+function saveSettings(){try{localStorage.setItem('swingSettings',JSON.stringify(params()))}catch(e){}}
+function resetDefaults(){FIELDS.forEach(k=>$(k).value=DEF[k]);saveSettings();refreshRules()}
+function params(){const p={};FIELDS.forEach(k=>p[k]=$(k).value);return p}
+function refreshRules(){
+  $('rSma').textContent=$('sma_len').value;$('rRsiLen').textContent=$('rsi_len').value;$('rEntry').textContent=$('entry_rsi').value;
+  $('rExit').textContent=$('exit_rsi').value;$('rHold').textContent=$('max_hold').value;
+  const m=$('sl_mode').value,v=$('sl_value').value;
+  $('rSl').textContent=m==='none'?'Stop loss: off':(m==='pct'?`Stop loss: ${v}% below buy`:`Stop loss: ${v} × ATR below buy`);
+  $('slHint').textContent=m==='none'?'not used':(m==='pct'?'e.g. 5 = sell if price falls 5%':'e.g. 2 = 2 × average daily range');
+  const slot=(+$('capital').value||0)/Math.max(1,+$('max_positions').value||1);$('slotHint').textContent='≈ '+inr(slot)+' per stock';
+}
+FIELDS.forEach(k=>$(k).addEventListener('change',()=>{saveSettings();refreshRules()}));
+
+function tab(t){$('paneScan').style.display=t==='scan'?'':'none';$('paneBt').style.display=t==='bt'?'':'none';
+  $('tabScan').className=t==='scan'?'on':'';$('tabBt').className=t==='bt'?'on':''}
+
+// ---------- data status ----------
+async function loadStatus(){
+  try{status=await api('/iifl/api/swing/status')}catch(e){$('syncMsg').innerHTML='<span class="err">'+esc(e.message)+'</span>';return}
+  if(!DEF.entry_rsi){DEF=status.defaults;loadSettings();if(!$('btFrom').value)period(12)}
+  const s=status;
+  $('dataKv').innerHTML=`<div><span>Stocks in NSE list</span><b>${s.stocks||0}</b></div><div><span>Stocks with data</span><b>${s.with_data||0}</b></div>
+    <div><span>Data from</span><b>${fmtD(s.first_day)}</b></div><div><span>Latest day</span><b>${fmtD(s.last_day)}</b></div>
+    <div><span>Download status</span><b class="${s.state==='DONE'?'pos':(s.state==='WAITING_LOGIN'||s.state==='ERROR'?'warn':'')}">${esc({RUNNING:'Downloading',QUEUED:'Starting…',DONE:'Up to date',WAITING_LOGIN:'Needs IIFL login',ERROR:'Error, retrying'}[s.state]||'Not started')}</b></div>
+    <div><span>Stocks that failed</span><b>${s.failed||0}</b></div>`;
+  const running=s.state==='RUNNING'||s.state==='QUEUED';
+  $('syncBarWrap').style.display=running?'':'none';
+  if(s.total)$('syncBar').style.width=Math.round(100*(s.done||0)/s.total)+'%';
+  $('syncMsg').textContent=(s.message||'')+(running&&s.total?` – ${Math.round(100*(s.done||0)/s.total)}%`:'');
+  $('dlBtn').disabled=running;$('dlBtn').textContent=s.with_data?'⬇ Download / extend history':'⬇ Download NSE daily data';
+  if(running)setTimeout(loadStatus,5000);
+  return s;
+}
+async function download(){try{await post('/iifl/api/swing/download',{years:$('years').value});loadStatus()}catch(e){alert(e.message)}}
+
+// ---------- jobs ----------
+async function runJob(url,body,bar,meta){
+  $(bar+'Wrap').style.display='';$(bar).style.width='3%';
+  const {job}=await post(url,body);
+  for(;;){
+    await new Promise(r=>setTimeout(r,800));
+    const j=await api('/iifl/api/swing/jobs/'+job);
+    if(j.total)$(bar).style.width=Math.max(3,Math.round(100*j.done/j.total))+'%';
+    $(meta).textContent=j.stage||'';
+    if(j.status==='done'){$(bar+'Wrap').style.display='none';$(meta).textContent='';return j.result}
+    if(j.status==='error'){$(bar+'Wrap').style.display='none';throw new Error(j.error)}
+  }
+}
+
+// ---------- scanner ----------
+async function runScan(){
+  $('scanBtn').disabled=true;$('scanOut').innerHTML='';
+  try{const r=await runJob('/iifl/api/swing/scan',{params:params()},'scanBar','scanMeta');renderScan(r)}
+  catch(e){$('scanOut').innerHTML='<p class="err">'+esc(e.message)+'</p>'}
+  $('scanBtn').disabled=false;
+}
+function histCell(h){if(!h||!h.trades)return '<span class="meta">no past trades</span>';
+  return `${h.trades} trades • <span class="${h.win_rate>=60?'pos':(h.win_rate<45?'neg':'')}">${h.win_rate}% wins</span> • <span class="${cls(h.avg_pct)}">${pct(h.avg_pct)}</span> avg`}
+function renderScan(r){
+  if(!r.day){$('scanOut').innerHTML='<p class="empty">No data yet.</p>';return}
+  const sl=$('sl_mode').value!=='none';
+  const rows=(list,buy)=>list.map(x=>`<tr><td><b>${esc(x.symbol)}</b></td><td class="num">${n2(x.close)}</td><td class="num"><b class="${buy?'pos':'warn'}">${x.rsi}</b> <span class="meta">(${x.rsi_prev??'–'})</span></td>
+    <td class="num">${pct(x.above_sma_pct)}</td><td class="num">${n2(x.value_cr)}</td><td class="num">${x.qty}</td>${sl?`<td class="num">${n2(x.sl)}</td>`:''}
+    ${buy?`<td>${histCell(x.history)}</td>`:''}<td><button class="ghost btn-sm" onclick="btStock('${esc(x.symbol)}')">backtest</button></td></tr>`).join('');
+  const head=buy=>`<tr><th>Stock</th><th class="num">Close</th><th class="num">RSI (prev)</th><th class="num">Above SMA</th><th class="num">Turnover ₹Cr</th><th class="num">Qty*</th>${sl?'<th class="num">Stop</th>':''}${buy?'<th>This strategy on this stock (all data)</th>':''}<th></th></tr>`;
+  $('scanOut').innerHTML=`
+    <div class="verdict">Based on the close of <b>${fmtD(r.day)}</b> • ${r.checked} liquid stocks checked.
+      <b class="pos">${r.buy.length}</b> buy signal${r.buy.length===1?'':'s'} for the next open (9:15).
+      ${r.buy.length>(+$('max_positions').value)?`<br><span class="warn">More signals than your ${$('max_positions').value} slots – the backtest takes the lowest RSI first; the list is sorted that way.</span>`:''}</div>
+    <h3 style="margin:6px 0 8px">🟢 Buy at next open</h3>
+    ${r.buy.length?`<div class="scroll"><table>${head(true)}${rows(r.buy,true)}</table></div>`:'<p class="empty">No stock matches today. That is normal – this setup fires only a few times a month.</p>'}
+    <h3 style="margin:18px 0 8px">🟡 Getting close (RSI ${$('entry_rsi').value}–35, still above SMA)</h3>
+    ${r.near.length?`<div class="scroll" style="max-height:340px"><table>${head(false)}${rows(r.near,false)}</table></div>`:'<p class="empty">None.</p>'}
+    <p class="meta" style="margin-top:10px">*Qty = capital ÷ max stocks ÷ close. The actual buy is at tomorrow's open, so the price can differ. Signals are suggestions, not advice – check news/results dates before buying.</p>`;
+}
+function btStock(sym){tab('bt');$('universe').value='list';$('symBox').style.display='';$('symbols').value=sym;period(0);runBt()}
+
+// ---------- backtest ----------
+function period(m){const end=status.last_day||new Date().toISOString().slice(0,10);$('btTo').value=end;
+  if(!m){$('btFrom').value='';return}const d=new Date(end+'T00:00:00');d.setMonth(d.getMonth()-m);$('btFrom').value=d.toISOString().slice(0,10)}
+async function runBt(){
+  $('btBtn').disabled=true;$('btOut').innerHTML='';
+  try{const r=await runJob('/iifl/api/swing/backtest',{params:params(),from:$('btFrom').value,to:$('btTo').value,universe:$('universe').value,symbols:$('symbols').value},'btBar','btMeta');renderBt(r)}
+  catch(e){$('btOut').innerHTML='<p class="err">'+esc(e.message)+'</p>'}
+  $('btBtn').disabled=false;
+}
+function verdict(s){
+  if(!s.trades)return 'No trades in this period – try a longer period or relax the RSI level.';
+  const good=s.total_return_pct>0&&(s.profit_factor||0)>=1.3, dd=Math.abs(s.max_dd_pct);
+  return `${good?'✅':'⚠️'} ${inr(s.initial_capital)} would have become <b class="${cls(s.total_profit)}">${inr(s.final_capital)}</b> (${pct(s.total_return_pct)}${s.cagr_pct!=null?`, ${pct(s.cagr_pct)} a year`:''}) after charges.
+    <b>${s.win_rate}%</b> of ${s.trades} trades won; worst fall from a peak was <b class="neg">${pct(s.max_dd_pct)}</b>${dd>20?' – that is a deep drawdown, consider a stop loss or fewer stocks.':'.'}
+    ${s.skipped_full?`<br><span class="meta">${s.skipped_full} signals were skipped because all ${$('max_positions').value} slots were full.</span>`:''}`;
+}
+function renderBt(r){
+  const s=r.summary, M=[
+    ['Initial capital',inr(s.initial_capital)],['Total return',pct(s.total_return_pct)],['Total profit',inr(s.total_profit)],['Final capital',inr(s.final_capital)],
+    ['Annualised return',pct(s.cagr_pct)],['Total trades',s.trades],['Winning trades',s.wins],['Losing trades',s.losses],['Win rate',s.win_rate+'%'],
+    ['Max drawdown',pct(s.max_dd_pct)],['Calmar ratio',n2(s.calmar)],['Profit factor',n2(s.profit_factor)],['Avg profit per trade',inr(s.avg_trade)],
+    ['Avg winning trade',pct(s.avg_win_pct)+(s.avg_win_r!=null?` (${s.avg_win_r}R)`:'')],['Avg losing trade',pct(s.avg_loss_pct)+(s.avg_loss_r!=null?` (${s.avg_loss_r}R)`:'')],
+    ['Expectancy',s.expectancy_r!=null?s.expectancy_r+'R':'–'],['Avg days held',s.avg_days],['Charges paid',inr(s.charges)]];
+  const reasons={};r.trades.forEach(t=>{const k=t.reason.startsWith('RSI')?'RSI exit':(t.reason.includes('days')?'Time exit':t.reason);(reasons[k]=reasons[k]||{n:0,net:0,w:0});reasons[k].n++;reasons[k].net+=t.net;if(t.net>0)reasons[k].w++});
+  const per={};r.trades.forEach(t=>{const p=(per[t.symbol]=per[t.symbol]||{n:0,net:0,w:0});p.n++;p.net+=t.net;if(t.net>0)p.w++});
+  const perRows=Object.entries(per).sort((a,b)=>b[1].net-a[1].net);
+  const best=perRows.slice(0,10),worst=perRows.slice(-10).reverse().filter(x=>x[1].net<0);
+  const monthly=monthlyReturns(r.equity, s.initial_capital);
+  $('btOut').innerHTML=`
+    <div class="verdict" style="margin-top:14px">${verdict(s)}<br><span class="meta">${fmtD(s.start)} → ${fmtD(s.end)} • ${r.stocks} stocks loaded</span></div>
+    <div style="display:grid;grid-template-columns:minmax(260px,360px) 1fr;gap:16px" class="btgrid">
+      <div><h3 style="margin-bottom:8px">Performance metrics</h3><table>${M.map(([k,v])=>`<tr><td class="meta">${k}</td><td class="num"><b>${v}</b></td></tr>`).join('')}</table></div>
+      <div><h3 style="margin-bottom:8px">Equity curve</h3><div class="chart" id="eqChart"></div><h3 style="margin:14px 0 8px">Drawdown</h3><div class="chart" id="ddChart"></div></div>
+    </div>
+    <h3 style="margin:18px 0 8px">How trades ended</h3>
+    <table><tr><th>Exit</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Net P&amp;L</th></tr>
+      ${Object.entries(reasons).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${v.n}</td><td class="num">${Math.round(100*v.w/v.n)}%</td><td class="num ${cls(v.net)}">${inr(v.net)}</td></tr>`).join('')}</table>
+    <h3 style="margin:18px 0 8px">Monthly returns</h3><div class="scroll" style="max-height:none">${monthly}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:18px">
+      <div><h3 style="margin-bottom:8px">Best stocks</h3>${stockTable(best)}</div><div><h3 style="margin-bottom:8px">Worst stocks</h3>${worst.length?stockTable(worst):'<p class="empty">No losing stocks</p>'}</div></div>
+    ${r.open.length?`<h3 style="margin:18px 0 8px">Still open at the end</h3><div class="scroll"><table><tr><th>Stock</th><th>Bought</th><th class="num">Buy</th><th class="num">Qty</th><th class="num">Last</th><th class="num">Unrealised</th><th>Exit tomorrow?</th></tr>
+      ${r.open.map(o=>`<tr><td><b>${esc(o.symbol)}</b></td><td>${fmtD(o.entry_day)}</td><td class="num">${n2(o.entry)}</td><td class="num">${o.qty}</td><td class="num">${n2(o.last)}</td><td class="num ${cls(o.unrealised)}">${inr(o.unrealised)}</td><td>${esc(o.exit_tomorrow||'–')}</td></tr>`).join('')}</table></div>`:''}
+    <h3 style="margin:18px 0 8px">All trades (${r.trades.length}${r.trades.length>=3000?', latest 3000':''})</h3>
+    <div class="scroll"><table><tr><th>Stock</th><th>Bought</th><th class="num">Buy</th><th class="num">Qty</th><th>Sold</th><th class="num">Sell</th><th class="num">Days</th><th class="num">Return</th><th class="num">Net P&amp;L</th><th>Exit</th><th class="num">RSI at signal</th></tr>
+      ${r.trades.slice().reverse().map(t=>`<tr><td><b>${esc(t.symbol)}</b></td><td>${fmtD(t.entry_day)}</td><td class="num">${n2(t.entry)}</td><td class="num">${t.qty}</td><td>${fmtD(t.exit_day)}</td><td class="num">${n2(t.exit)}</td><td class="num">${t.days}</td><td class="num ${cls(t.ret_pct)}">${pct(t.ret_pct)}</td><td class="num ${cls(t.net)}">${inr(t.net)}</td><td>${esc(t.reason)}</td><td class="num">${t.entry_rsi}</td></tr>`).join('')}</table></div>`;
+  line('eqChart',r.equity.map(e=>({d:e.d,v:e.eq,o:e.open})),'#32d583',v=>inr(v),e=>`${e.o} open`,s.initial_capital);
+  let peak=-Infinity;line('ddChart',r.equity.map(e=>{peak=Math.max(peak,e.eq);return {d:e.d,v:(e.eq/peak-1)*100}}),'#ff6b6b',v=>v.toFixed(2)+'%',null,0,120);
+}
+function stockTable(rows){return `<table><tr><th>Stock</th><th class="num">Trades</th><th class="num">Wins</th><th class="num">Net</th></tr>${rows.map(([k,v])=>`<tr><td><b>${esc(k)}</b></td><td class="num">${v.n}</td><td class="num">${Math.round(100*v.w/v.n)}%</td><td class="num ${cls(v.net)}">${inr(v.net)}</td></tr>`).join('')}</table>`}
+function monthlyReturns(eq,cap){
+  const m={};let prev=cap;eq.forEach(e=>{const k=e.d.slice(0,7);if(!m[k])m[k]={start:prev};m[k].end=e.eq;prev=e.eq});
+  const years=[...new Set(Object.keys(m).map(k=>k.slice(0,4)))];const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `<table><tr><th>Year</th>${MN.map(x=>`<th class="num">${x}</th>`).join('')}<th class="num">Year</th></tr>${years.map(y=>{let ys=null,ye=null;
+    const cells=MN.map((_,i)=>{const k=y+'-'+String(i+1).padStart(2,'0'),v=m[k];if(!v)return '<td></td>';if(ys==null)ys=v.start;ye=v.end;const r=(v.end/v.start-1)*100;return `<td class="num ${cls(r)}">${r.toFixed(1)}</td>`}).join('');
+    const yr=(ye/ys-1)*100;return `<tr><td>${y}</td>${cells}<td class="num ${cls(yr)}"><b>${yr.toFixed(1)}%</b></td></tr>`}).join('')}</table>`;
+}
+function line(id,pts,color,fmt,extra,base,H=220){
+  const el=$(id);if(!pts.length){el.innerHTML='';return}
+  const W=el.clientWidth||700,P={l:70,r:10,t:10,b:24};
+  let lo=Math.min(...pts.map(p=>p.v),base),hi=Math.max(...pts.map(p=>p.v),base);if(hi===lo)hi=lo+1;
+  const x=i=>P.l+(W-P.l-P.r)*i/Math.max(1,pts.length-1),y=v=>P.t+(H-P.t-P.b)*(1-(v-lo)/(hi-lo));
+  const ticks=[0,1,2,3,4].map(k=>lo+(hi-lo)*k/4);
+  const step=Math.max(1,Math.floor(pts.length/6));
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" height="${H}">${ticks.map(t=>`<line x1="${P.l}" x2="${W-P.r}" y1="${y(t)}" y2="${y(t)}" stroke="#1d2842"/><text x="${P.l-6}" y="${y(t)+4}" fill="#91a0bd" font-size="10" text-anchor="end">${fmt(t)}</text>`).join('')}
+    <line x1="${P.l}" x2="${W-P.r}" y1="${y(base)}" y2="${y(base)}" stroke="#4a5d86" stroke-dasharray="4 4"/>
+    ${pts.map((p,i)=>i%step===0?`<text x="${x(i)}" y="${H-6}" fill="#91a0bd" font-size="10" text-anchor="middle">${new Date(p.d+'T00:00:00').toLocaleDateString('en-IN',{month:'short',year:'2-digit'})}</text>`:'').join('')}
+    <polyline fill="none" stroke="${color}" stroke-width="2" points="${pts.map((p,i)=>x(i)+','+y(p.v)).join(' ')}"/>
+    <line id="${id}H" y1="${P.t}" y2="${H-P.b}" stroke="#6ea8fe" opacity="0"/></svg>`;
+  const svg=el.querySelector('svg'),tip=$('tip'),hl=$(id+'H');
+  svg.onmousemove=ev=>{const b=svg.getBoundingClientRect(),mx=(ev.clientX-b.left)*W/b.width;const i=Math.max(0,Math.min(pts.length-1,Math.round((mx-P.l)/(W-P.l-P.r)*(pts.length-1))));
+    hl.setAttribute('x1',x(i));hl.setAttribute('x2',x(i));hl.setAttribute('opacity',1);
+    tip.innerHTML=`${fmtD(pts[i].d)}<br><b>${fmt(pts[i].v)}</b>${extra?'<br>'+extra(pts[i]):''}`;tip.style.opacity=1;tip.style.left=(ev.pageX+12)+'px';tip.style.top=(ev.pageY-10)+'px'};
+  svg.onmouseleave=()=>{tip.style.opacity=0;hl.setAttribute('opacity',0)};
+}
+loadStatus().then(s=>{if(s&&s.with_data)runScan()});
+</script>
+<style>@media(max-width:800px){.btgrid{grid-template-columns:1fr!important}.kv{grid-template-columns:1fr 1fr}}</style>
+</body>
+</html>
