@@ -173,6 +173,8 @@ curl -s -o /dev/null -w "RSI page HTTP %{http_code}\n" http://127.0.0.1:5015/iif
 
 Analysis only – no orders, no change to the live engine. Rules: Camarilla S2/S4 (buy) and R2/R4 (sell) from the previous day, direction from RSI 21 crossing back through 40 / 60, stop at the signal candle's low/high, target at the next level, 15-minute candles.
 
+Improvements: **Min reward : risk** setting (skip trades whose target is closer than the stop), a data-gap guard (no pivots from an older day when a trading day is missing; Muhurat-style special sessions ignored) and **Optimise settings** (tests ~200 combinations on the first ⅔ of the dates, shows how the best ones did on the last ⅓).
+
 Data: on the Analysis page add **NIFTY** (or **NIFTYBEES** if IIFL can't find the index in the equity list) and fetch 1–3 months. Then open 🎯 Camarilla → Run backtest, or **Check now** during market hours (needs the IIFL login).
 
 ```bash

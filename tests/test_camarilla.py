@@ -91,6 +91,51 @@ class CamarillaTests(unittest.TestCase):
         self.assertIn("rsi", st)
         self.assertEqual(set(st["levels"]), {"S4", "S2", "R2", "R4"})
 
+    def test_min_rr_filters_close_targets(self):
+        data = synth(days=30)
+        off = cs.backtest(data, {"min_rr": 0})
+        on = cs.backtest(data, {"min_rr": 1.5})
+        self.assertLessEqual(on["summary"]["trades"], off["summary"]["trades"])
+        for s in on["signals"]:
+            if s["taken"]:
+                self.assertGreaterEqual(abs(s["target"] - s["entry"]) / abs(s["entry"] - s["sl"]), 1.5 - 1e-6)
+
+    def test_gap_guard_skips_day_after_missing_day(self):
+        data = synth(days=6)
+        days = sorted({c["ts"][:10] for c in data})
+        holey = [c for c in data if c["ts"][:10] != days[2]]
+        weekday = lambda d: d.weekday() < 5
+        levels, _, missing = cs.daily_levels(holey, is_trading_day=weekday)
+        self.assertIn(days[2], missing)
+        self.assertNotIn(days[3], levels)          # its real previous day is missing
+        self.assertIn(days[4], levels)
+        levels2, _, _ = cs.daily_levels(holey)     # without the guard it uses the older day
+        self.assertIn(days[3], levels2)
+
+    def test_special_session_on_holiday_is_ignored(self):
+        data = synth(days=4)
+        days = sorted({c["ts"][:10] for c in data})
+        holiday = days[1]
+        is_td = lambda d: d.weekday() < 5 and d.isoformat() != holiday
+        levels, _, missing = cs.daily_levels(data, is_trading_day=is_td)
+        self.assertNotIn(holiday, levels)          # no trading on the special session
+        self.assertIn(days[2], levels)             # next day uses the last full day, not the special session
+        self.assertEqual(missing, [])
+        first = [c for c in data if c["ts"][:10] == days[0]]
+        self.assertAlmostEqual(levels[days[2]]["R4"], cs.camarilla(max(c["high"] for c in first),
+                               min(c["low"] for c in first), first[-1]["close"])["R4"])
+
+    def test_optimize_tunes_and_checks_separately(self):
+        data = synth(days=30)
+        days = sorted({c["ts"][:10] for c in data})
+        small = {"bands": [(40, 60)], "min_rr": [0, 1], "max_sl_pct": [0.25], "level_tol_pct": [0.05],
+                 "touch_lookback": [2]}
+        o = cs.optimize(data, {}, (days[1], days[19]), (days[20], days[-1]), grid=small)
+        self.assertEqual(o["tested"], 2)
+        self.assertIn("check", o["current"])
+        for b in o["best"]:
+            self.assertIn(b["settings"]["min_rr"], (0, 1))
+
 
 if __name__ == "__main__":
     unittest.main()

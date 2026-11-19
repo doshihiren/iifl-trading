@@ -18,6 +18,8 @@ such as NIFTYBEES, or near-month futures all give the same pattern of signals.
 """
 
 from collections import OrderedDict
+from datetime import date, timedelta
+from itertools import product
 
 DEFAULTS = {
     "timeframe_min": 15,
@@ -27,6 +29,7 @@ DEFAULTS = {
     "level_tol_pct": 0.05,     # candle is "at" a level if its range comes within this % of it
     "touch_lookback": 2,       # the level may be touched up to N candles before the RSI cross
     "max_sl_pct": 0.25,        # skip if stop is wider than this % of price (~65 pts at 26,000)
+    "min_rr": 0.0,             # skip if (target distance / stop distance) is below this; 0 = off (video rules)
     "no_entry_after": "15:00", # signal candle must close by this time
     "square_off": "15:15",
     "charges_pts": 0.0,        # optional round-trip cost in index points per trade
@@ -101,9 +104,20 @@ def resample(candles, tf_min):
     return bars
 
 
-def daily_levels(candles, prev_day=None):
-    """IST date -> Camarilla levels from the previous trading day in the data.
-    `prev_day` = {"high","low","close"} supplies levels for the first day."""
+def _prev_trading_day(day, is_trading_day):
+    d = date.fromisoformat(day) - timedelta(days=1)
+    for _ in range(15):
+        if is_trading_day(d):
+            return d.isoformat()
+        d -= timedelta(days=1)
+    return None
+
+
+def daily_levels(candles, prev_day=None, is_trading_day=None):
+    """IST date -> Camarilla levels from the previous trading day.
+    `prev_day` = {"high","low","close"} supplies levels for the first day.
+    `is_trading_day(date)` (optional) enables the gap guard: a day whose real previous
+    trading day is missing from the data gets no levels (listed in `missing`)."""
     days = OrderedDict()
     for c in candles:
         d = days.setdefault(c["ts"][:10], {"high": c["high"], "low": c["low"], "close": c["close"]})
@@ -111,13 +125,38 @@ def daily_levels(candles, prev_day=None):
         d["low"] = min(d["low"], c["low"])
         d["close"] = c["close"]
     keys = list(days)
-    levels = {}
+    levels, missing = {}, []
     if prev_day and keys:
         levels[keys[0]] = camarilla(prev_day["high"], prev_day["low"], prev_day["close"])
-    for a, b in zip(keys, keys[1:]):
-        p = days[a]
-        levels[b] = camarilla(p["high"], p["low"], p["close"])
-    return levels, days
+    if not is_trading_day:
+        for a, b in zip(keys, keys[1:]):
+            p = days[a]
+            levels[b] = camarilla(p["high"], p["low"], p["close"])
+        return levels, days, missing
+    # Gap guard: pivots only from the real previous trading day. Special sessions on
+    # non-trading days (e.g. Diwali Muhurat) are never used as a pivot source or traded.
+    last_full = keys[0] if is_trading_day(date.fromisoformat(keys[0])) else None
+    for b in keys[1:]:
+        if not is_trading_day(date.fromisoformat(b)):
+            continue
+        want = _prev_trading_day(b, is_trading_day)
+        if last_full and want == last_full:
+            p = days[last_full]
+            levels[b] = camarilla(p["high"], p["low"], p["close"])
+        elif want and (not last_full or want > last_full):
+            missing.append(want)
+        last_full = b
+    return levels, days, missing
+
+
+def prepare(candles, params=None, prev_day=None, is_trading_day=None):
+    """Bars, RSI and levels — computed once and reused by the optimiser."""
+    p = {**DEFAULTS, **(params or {})}
+    bars = resample(candles, p["timeframe_min"])
+    rsi = rsi_wilder([b["close"] for b in bars], p["rsi_period"])
+    levels, _, missing = daily_levels(candles, prev_day, is_trading_day)
+    return {"bars": bars, "rsi": rsi, "levels": levels, "missing": missing,
+            "key": (p["timeframe_min"], p["rsi_period"])}
 
 
 def _touched(bars, i, level, p):
@@ -130,12 +169,12 @@ def _touched(bars, i, level, p):
     return False
 
 
-def signals(candles, params=None, prev_day=None):
+def signals(candles, params=None, prev_day=None, prepared=None, is_trading_day=None):
     """All RSI crosses with the decision taken on each. Returns (bars, rsi, levels, signal list)."""
     p = {**DEFAULTS, **(params or {})}
-    bars = resample(candles, p["timeframe_min"])
-    rsi = rsi_wilder([b["close"] for b in bars], p["rsi_period"])
-    levels, _ = daily_levels(candles, prev_day)
+    if prepared is None or prepared["key"] != (p["timeframe_min"], p["rsi_period"]):
+        prepared = prepare(candles, p, prev_day, is_trading_day)
+    bars, rsi, levels = prepared["bars"], prepared["rsi"], prepared["levels"]
     cutoff = _mins(p["no_entry_after"])
     out = []
     for i in range(1, len(bars)):
@@ -178,17 +217,24 @@ def signals(candles, params=None, prev_day=None):
             sig.update(reason="stop too wide", sl_points=round(risk, 1))
         elif beyond:
             sig["reason"] = "already past target"
+        elif p["min_rr"] > 0 and risk > 0 and abs(target - b["close"]) / risk < p["min_rr"]:
+            sig.update(reason="target too close", rr=round(abs(target - b["close"]) / risk, 2))
         else:
             sig.update(taken=True, reason="TRADE")
     return bars, rsi, levels, out
 
 
-def backtest(candles, params=None, trade_from=None, prev_day=None):
+def backtest(candles, params=None, trade_from=None, prev_day=None, prepared=None, is_trading_day=None,
+             trade_to=None):
     """Index-points backtest, one trade at a time, exits checked minute by minute."""
     p = {**DEFAULTS, **(params or {})}
-    bars, rsi, levels, sigs = signals(candles, p, prev_day)
+    if prepared is None or prepared["key"] != (p["timeframe_min"], p["rsi_period"]):
+        prepared = prepare(candles, p, prev_day, is_trading_day)
+    bars, rsi, levels, sigs = signals(candles, p, prepared=prepared)
     if trade_from:
         sigs = [s for s in sigs if s["ts"][:10] >= trade_from]
+    if trade_to:
+        sigs = [s for s in sigs if s["ts"][:10] <= trade_to]
     sq = _mins(p["square_off"])
     trades, busy_until = [], -1
     for s in sigs:
@@ -232,7 +278,9 @@ def backtest(candles, params=None, trade_from=None, prev_day=None):
                        "exit_time": exit_ts[11:16], "exit": round(exit_px, 2), "exit_reason": why,
                        "points": round(pts, 2), "pct": round(pts / s["entry"] * 100, 3)})
         busy_until = j
-    return {"summary": summarize(trades, sigs), "trades": trades, "signals": sigs, "params": p}
+    missing = [d for d in prepared["missing"] if (not trade_from or d >= trade_from) and (not trade_to or d <= trade_to)]
+    return {"summary": summarize(trades, sigs), "trades": trades, "signals": sigs, "params": p,
+            "missing_days": missing}
 
 
 def summarize(trades, sigs):
@@ -284,3 +332,54 @@ def current_state(candles, params=None):
         "levels": {k: round(lv[k], 2) for k in LEVEL_ORDER} if lv else None,
         "nearest": near, "signal": sig,
     }
+
+
+# ---------------------------------------------------------------- optimiser
+GRID = {
+    "bands": [(40, 60), (35, 65), (45, 55)],
+    "min_rr": [0.0, 0.5, 1.0, 1.5],
+    "max_sl_pct": [0.15, 0.25, 0.4],
+    "level_tol_pct": [0.03, 0.05, 0.1],
+    "touch_lookback": [0, 2],
+}
+MIN_TUNE_TRADES = 6
+
+
+def _score(s):
+    """Rank by net points, but penalise settings that trade too little to trust."""
+    if s["trades"] < MIN_TUNE_TRADES:
+        return float("-inf")
+    return s["net_points"] + 0.2 * s["max_drawdown_points"]   # drawdown is negative
+
+
+def optimize(candles, base, tune, check, grid=GRID, top=10, is_trading_day=None):
+    """Try every grid combination on the tune period, then run the best on the check period.
+    tune / check = (from, to) ISO dates. Settings are judged only on `tune`; `check` shows
+    whether they still work on days they were not chosen on."""
+    p0 = {**DEFAULTS, **(base or {})}
+    prep = prepare(candles, p0, is_trading_day=is_trading_day)
+    keys = [k for k in grid if k != "bands"]
+    rows = []
+    for bands, *vals in product(grid["bands"], *(grid[k] for k in keys)):
+        p = {**p0, "lower_band": bands[0], "upper_band": bands[1], **dict(zip(keys, vals))}
+        r = backtest(candles, p, trade_from=tune[0], trade_to=tune[1], prepared=prep)
+        rows.append((p, r["summary"]))
+    rows.sort(key=lambda x: _score(x[1]), reverse=True)
+
+    def brief(s):
+        return {k: s[k] for k in ("trades", "win_rate", "net_points", "max_drawdown_points", "avg_win", "avg_loss")}
+
+    def settings(p):
+        return {k: p[k] for k in ("lower_band", "upper_band", "min_rr", "max_sl_pct", "level_tol_pct", "touch_lookback")}
+
+    video = backtest(candles, p0, trade_from=tune[0], trade_to=tune[1], prepared=prep)["summary"]
+    video_check = backtest(candles, p0, trade_from=check[0], trade_to=check[1], prepared=prep)["summary"]
+    best = []
+    for p, s in rows[:top]:
+        if _score(s) == float("-inf"):
+            break
+        c = backtest(candles, p, trade_from=check[0], trade_to=check[1], prepared=prep)["summary"]
+        best.append({"settings": settings(p), "tune": brief(s), "check": brief(c)})
+    return {"tested": len(rows), "tune": tune, "check": check,
+            "current": {"settings": settings(p0), "tune": brief(video), "check": brief(video_check)},
+            "best": best, "missing_days": prep["missing"]}

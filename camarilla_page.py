@@ -46,6 +46,7 @@ def _params(body):
         "level_tol_pct": f("level_tol_pct", 0, 1),
         "touch_lookback": int(f("touch_lookback", 0, 10)),
         "max_sl_pct": f("max_sl_pct", 0.01, 5),
+        "min_rr": f("min_rr", 0, 5),
         "charges_pts": f("charges_pts", 0, 100),
     }
     if p["timeframe_min"] not in (5, 15, 30):
@@ -55,6 +56,10 @@ def _params(body):
         cal.parse_hhmm(v)
         p[k] = v
     return p
+
+
+def _is_trading_day(d):
+    return cal.is_trading_day(datetime(d.year, d.month, d.day, 12, tzinfo=IST))
 
 
 def _symbol(body):
@@ -86,7 +91,7 @@ def api_run():
         return _err(str(exc) or "Check the settings")
     if not data or data[-1]["ts"][:10] < d_from:
         return _err(f"No candles between {d_from} and {d_to}")
-    out = cs.backtest(data, p, trade_from=d_from)
+    out = cs.backtest(data, p, trade_from=d_from, trade_to=d_to, is_trading_day=_is_trading_day)
     sigs = out["signals"]
     out["signals"] = [{k: v for k, v in s.items() if k != "bar"} for s in sigs[-MAX_ROWS:]]
     out["trades"] = out["trades"][-MAX_ROWS:]
@@ -94,6 +99,32 @@ def api_run():
     out["meta"] = {"symbol": sym["symbol"], "from": d_from, "to": data[-1]["ts"], "candles": len(data),
                    "note": ("Your start date is the first day of data, so that day has no pivots "
                             "(pivots need the previous day).") if first_day >= d_from else None}
+    return jsonify({"status": "Ok", "result": out})
+
+
+@bp.route("/iifl/api/camarilla/optimize", methods=["POST"])
+def api_optimize():
+    """Tune on the first 2/3 of the dates, check on the last 1/3 (or the dates given)."""
+    body = request.get_json(silent=True) or {}
+    try:
+        sym = _symbol(body)
+        p = _params(body)
+        cov = candle_store.coverage(sym["instrumentId"])
+        if not cov["n"]:
+            raise ValueError("No candles stored yet for this script")
+        d_from = (body.get("from") or cov["first"][:10])[:10]
+        d_to = (body.get("to") or cov["last"][:10])[:10]
+        warm = max((date.fromisoformat(d_from) - timedelta(days=WARMUP_DAYS)).isoformat(), cov["first"][:10])
+        data = candle_store.load(sym["instrumentId"], warm, d_to)
+    except (TypeError, ValueError) as exc:
+        return _err(str(exc) or "Check the settings")
+    days = sorted({c["ts"][:10] for c in data if d_from <= c["ts"][:10] <= d_to})
+    if len(days) < 15:
+        return _err(f"Need at least 15 trading days for a fair test (have {len(days)}) – fetch more data")
+    cut = len(days) * 2 // 3
+    tune, check = (days[0], days[cut - 1]), (days[cut], days[-1])
+    out = cs.optimize(data, p, tune, check, is_trading_day=_is_trading_day)
+    out["meta"] = {"symbol": sym["symbol"], "days": len(days)}
     return jsonify({"status": "Ok", "result": out})
 
 

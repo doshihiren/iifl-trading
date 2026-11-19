@@ -72,6 +72,7 @@
         <div class="f"><label>"At the level" tolerance %</label><input type="number" id="level_tol_pct" value="0.05" step="0.01"><div class="hint">0.05% ≈ 13 Nifty pts</div></div>
         <div class="f"><label>Touch lookback (candles)</label><input type="number" id="touch_lookback" value="2"><div class="hint">Level touched before the RSI cross</div></div>
         <div class="f"><label>Max stop %</label><input type="number" id="max_sl_pct" value="0.25" step="0.05"><div class="hint">0.25% ≈ 65 Nifty pts</div></div>
+        <div class="f"><label>Min reward : risk</label><input type="number" id="min_rr" value="0" step="0.25"><div class="hint">1 = target at least as far as stop • 0 = off</div></div>
         <div class="f"><label>No new entry after</label><input type="time" id="no_entry_after" value="15:00"><div class="hint"></div></div>
         <div class="f"><label>Square off at</label><input type="time" id="square_off" value="15:15"><div class="hint"></div></div>
         <div class="f"><label>Charges (points / trade)</label><input type="number" id="charges_pts" value="0" step="0.5"><div class="hint">Optional cost per round trip</div></div>
@@ -80,6 +81,7 @@
     <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
       <button class="go" onclick="run()">Run backtest</button>
       <button class="secondary" onclick="checkNow()">Check now (live)</button>
+      <button class="secondary" onclick="optimize()">Optimise settings</button>
       <span class="meta" id="msg" style="align-self:center"></span>
     </div>
     <p class="meta" style="margin-top:12px">No script yet? On the <a href="/iifl/analysis" style="color:var(--blue)">Analysis page</a> add <b>NIFTY</b> (if IIFL can't find the index there, use <b>NIFTYBEES</b> – the signals are % based so the pattern is the same). Fetch at least 1 month.</p>
@@ -88,6 +90,12 @@
   <div class="card" id="nowBox" style="display:none">
     <h2><span class="step">2</span>Right now</h2>
     <div id="nowBody"></div>
+  </div>
+
+  <div class="card" id="optBox" style="display:none">
+    <h2><span class="step">⚙</span>Optimise <span class="meta" id="optMeta"></span></h2>
+    <p class="meta">Each setting combination is scored on the <b>tune</b> period only. The <b>check</b> period shows how it did on later days it was not chosen on – trust settings that are still positive there, not just the best tune number.</p>
+    <div id="optBody"></div>
   </div>
 
   <div id="results">
@@ -117,7 +125,7 @@ async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){loca
 const post=(u,b)=>api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 const fmt=(v,d=2)=>v==null?'–':Number(v).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});
 const cls=v=>v>0?'pos':v<0?'neg':'';
-const KEYS=['timeframe_min','rsi_period','upper_band','lower_band','level_tol_pct','touch_lookback','max_sl_pct','no_entry_after','square_off','charges_pts'];
+const KEYS=['timeframe_min','rsi_period','upper_band','lower_band','level_tol_pct','touch_lookback','max_sl_pct','min_rr','no_entry_after','square_off','charges_pts'];
 
 async function loadSyms(){
   try{SYMS=await api('/iifl/api/analysis/symbols')}catch(e){$('symHint').textContent=e.message;return}
@@ -144,7 +152,9 @@ async function run(){
 function render(r){
   $('results').style.display='block';const s=r.summary;
   $('metaLine').textContent=`• ${r.meta.symbol} • ${r.meta.from} → ${r.meta.to.slice(0,10)}`;
-  $('note').textContent=r.meta.note||'Points are index points per unit (entry at signal candle close; stops and targets checked every minute). Option P&L will differ (premium, delta, decay).';
+  const miss=(r.missing_days||[]);
+  const gap=miss.length?` ⚠ ${miss.length} trading day(s) missing in the data (${miss.slice(0,6).join(', ')}${miss.length>6?'…':''}) – the day after each gap is skipped. Re-fetch on the Analysis page.`:'';
+  $('note').textContent=(r.meta.note||'')+gap+' '+'Points are index points per unit (entry at signal candle close; stops and targets checked every minute). Option P&L will differ (premium, delta, decay).';
   $('kv').innerHTML=[
     ['Trades',s.trades,''],['Win rate',s.win_rate+'%',''],['Net points',fmt(s.net_points),cls(s.net_points)],
     ['Avg win',fmt(s.avg_win),'pos'],['Avg loss',fmt(s.avg_loss),'neg'],['Max drawdown (pts)',fmt(s.max_drawdown_points),'neg'],
@@ -157,6 +167,21 @@ function render(r){
   $('sigs').innerHTML='<tr><th>Candle</th><th>Closes</th><th>Side</th><th class="num">RSI</th><th class="num">Close</th><th>Level</th><th>Decision</th></tr>'+
     r.signals.slice().reverse().map(g=>`<tr><td>${g.ts}</td><td>${g.close_time}</td><td>${g.side}</td><td class="num">${g.rsi}</td><td class="num">${fmt(g.entry)}</td><td>${g.level||'–'}</td><td class="${g.taken?'pos':'meta'}">${g.taken?'TRADE':g.reason+(g.sl_points?` (${g.sl_points} pts)`:'')}</td></tr>`).join('');
 }
+
+async function optimize(){
+  $('optBox').style.display='block';$('optBody').innerHTML='<span class="meta">Testing about 200 combinations… (10–40 s)</span>';
+  try{const o=await post('/iifl/api/camarilla/optimize',body());
+    $('optMeta').textContent=`• ${o.meta.symbol} • tune ${o.tune[0]} → ${o.tune[1]} • check ${o.check[0]} → ${o.check[1]} • ${o.tested} tested`;
+    const S=x=>`RSI ${x.lower_band}/${x.upper_band} • R:R ≥ ${x.min_rr} • max stop ${x.max_sl_pct}% • tol ${x.level_tol_pct}% • lookback ${x.touch_lookback}`;
+    const R=r=>`<td class="num">${r.trades}</td><td class="num">${r.win_rate}%</td><td class="num ${cls(r.net_points)}">${fmt(r.net_points)}</td>`;
+    const rows=[`<tr style="background:#0c1426"><td>Your current settings</td><td class="meta">${S(o.current.settings)}</td>${R(o.current.tune)}${R(o.current.check)}<td></td></tr>`]
+      .concat(o.best.map((b,i)=>`<tr><td>#${i+1}</td><td>${S(b.settings)}</td>${R(b.tune)}${R(b.check)}<td><button class="secondary" style="padding:5px 10px" onclick='useSettings(${JSON.stringify(b.settings)})'>Use</button></td></tr>`));
+    $('optBody').innerHTML=(o.best.length?'':'<p class="warnc">No setting made enough trades in the tune period – fetch more days.</p>')
+      +(o.missing_days.length?`<p class="warnc">⚠ ${o.missing_days.length} trading day(s) missing in the data – re-fetch on the Analysis page for a fair result.</p>`:'')
+      +`<div class="scroll"><table><tr><th></th><th>Settings</th><th class="num">Tune trades</th><th class="num">Tune win</th><th class="num">Tune pts</th><th class="num">Check trades</th><th class="num">Check win</th><th class="num">Check pts</th><th></th></tr>${rows.join('')}</table></div>`;
+  }catch(e){$('optBody').innerHTML=`<span class="err">${e.message}</span>`}
+}
+function useSettings(x){Object.entries(x).forEach(([k,v])=>{if($(k))$(k).value=v});document.querySelector('details').open=true;run()}
 
 async function checkNow(){
   $('nowBox').style.display='block';$('nowBody').innerHTML='<span class="meta">Checking…</span>';
