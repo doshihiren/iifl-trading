@@ -104,6 +104,32 @@ def simulate(rows, start=None,end=None,tolerance=5.0,slippage=1.0,fees=0.0,quant
              "unit":"index points x quantity; NOT option premium P&L"}
     return {"summary":summary,"trades":trades}
 
+# Defaults scaled to the script's price, so the same rules work on NIFTY (~26,000) and NIFTYBEES (~₹290).
+TOL_PCT = 0.05        # "at the level" band ≈ 13 Nifty points
+SLIP_PCT = 0.004      # slippage per side ≈ 1 Nifty point
+
+
+def scaled_defaults(price, tick):
+    tick = tick if tick and tick > 0 else 0.05
+    tol = round(price * TOL_PCT / 100, 2) if price else 5.0
+    slip = round(price * SLIP_PCT / 100 / tick) * tick if price else 1.0
+    return {"tolerance": tol, "slippage": round(max(slip, tick), 4), "fees": 0, "quantity": 1}
+
+
+@bp.get("/iifl/api/camarilla-rsi/defaults")
+def defaults():
+    iid = str(request.args.get("instrument_id") or "")
+    sym = db.row("SELECT * FROM analysis_symbols WHERE instrumentId=?", (iid,))
+    if not sym:
+        return jsonify(status="error", message="Unknown symbol"), 400
+    last = db.row("SELECT ts, close FROM candles WHERE instrumentId=? ORDER BY ts DESC LIMIT 1", (iid,))
+    cov = store.coverage(iid)
+    price = float(last["close"]) if last else 0.0
+    out = scaled_defaults(price, float(sym.get("tick_size") or 0))
+    out.update(price=price, first=(cov["first"] or "")[:10], last=(cov["last"] or "")[:10])
+    return jsonify(status="Ok", result=out)
+
+
 @bp.get("/iifl/camarilla-rsi")
 def page():
     return render_template_string(PAGE)
@@ -145,6 +171,7 @@ table{border-collapse:collapse;width:100%;font-size:13px}td,th{padding:7px;borde
 <label>Slippage points per side <input id="slippage" type="number" value="1" step=".5" min="0"></label>
 <label>Fees points per side <input id="fees" type="number" value="0" step=".1" min="0"></label>
 <label>Index proxy quantity <input id="quantity" type="number" value="1" min="1"></label>
+<p><small id="defaultsNote" style="color:#9cbffa"></small></p>
 <p><button onclick="runBacktest()">Run Backtest</button> <span id="message"></span></p>
 <small>Read-only analysis. NOT a real NIFTY CE/PE options backtest. P&L is a synthetic index-points proxy.</small></div>
 <div class="panel" id="output" hidden><div class="stats" id="stats"></div><h3>Closed trades</h3>
@@ -157,8 +184,19 @@ function escapeHTML(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c
 return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 fetch('/iifl/api/analysis/symbols').then(r=>r.json()).then(d=>{
 el('symbol').innerHTML=(d.result||[]).map(s=>'<option value="'+escapeHTML(s.instrumentId)+'">'+escapeHTML(s.symbol)+' ('+escapeHTML(s.days)+' days)</option>').join('');
-if(!d.result.length)el('message').textContent='Add and sync NIFTY in Analysis first.'
+if(!d.result.length){el('message').textContent='Add and sync NIFTY in Analysis first.';return}
+let pref=d.result.find(s=>/NIFTY/.test(s.symbol));if(pref)el('symbol').value=pref.instrumentId;
+loadDefaults();
 }).catch(e=>el('message').textContent=e.message)
+el('symbol').addEventListener('change',loadDefaults);
+async function loadDefaults(){
+try{let r=await fetch('/iifl/api/camarilla-rsi/defaults?instrument_id='+encodeURIComponent(el('symbol').value));
+let d=await r.json();if(!r.ok)throw Error(d.message||'Could not load defaults');let v=d.result;
+['tolerance','slippage','fees','quantity'].forEach(k=>el(k).value=v[k]);
+if(v.first){let f=new Date(v.first);f.setDate(f.getDate()+3);el('from').value=f.toISOString().slice(0,10)}
+if(v.last)el('to').value=v.last;
+el('defaultsNote').textContent='Defaults for price '+v.price.toLocaleString('en-IN')+': tolerance '+v.tolerance+' (≈0.05%), slippage '+v.slippage+' per side.';
+}catch(e){el('defaultsNote').textContent=e.message}}
 async function runBacktest(){
 let payload={instrument_id:el('symbol').value};
 ['from','to','tolerance','slippage','fees','quantity'].forEach(k=>{if(el(k).value)payload[k]=el(k).value});

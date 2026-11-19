@@ -48,5 +48,18 @@ class CamarillaTests(unittest.TestCase):
             simulate(minutes(), tolerance=-1)
 
 
+
+class ScaledDefaultsTests(unittest.TestCase):
+    def test_defaults_scale_with_price(self):
+        import camarilla_rsi as c
+        bees = c.scaled_defaults(288.6, 0.01)
+        self.assertAlmostEqual(bees["tolerance"], 0.14)
+        self.assertAlmostEqual(bees["slippage"], 0.01)
+        nifty = c.scaled_defaults(26050, 0.05)
+        self.assertAlmostEqual(nifty["slippage"], 1.05)
+        self.assertGreater(nifty["tolerance"], 10)
+        self.assertEqual(c.scaled_defaults(0, 0.05)["tolerance"], 5.0)
+
+
 if __name__ == "__main__":
     unittest.main()
