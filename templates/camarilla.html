@@ -79,6 +79,8 @@
         <div class="f"><label>"At the level" tolerance %</label><input type="number" id="level_tol_pct" value="0.05" step="0.01"><div class="hint">0.05% ≈ 13 Nifty pts</div></div>
         <div class="f"><label>Touch lookback (candles)</label><input type="number" id="touch_lookback" value="2"><div class="hint">Level touched before the RSI cross</div></div>
         <div class="f"><label>Max stop %</label><input type="number" id="max_sl_pct" value="0.25" step="0.05"><div class="hint">0.25% ≈ 65 Nifty pts</div></div>
+        <div class="f"><label>Trend filter</label><select id="trend_filter"><option value="off">Off (video)</option><option value="daily">Daily – yesterday's close vs 5-day average</option><option value="ema">15m EMA-50 rising / falling</option></select><div class="hint">Buy only in an up-trend, sell only in a down-trend</div></div>
+        <div class="f"><label>Target</label><select id="target_mode"><option value="next">Next level (video)</option><option value="mid">Halfway to next level</option></select><div class="hint">Closer target = hit more often</div></div>
         <div class="f"><label>Min reward : risk</label><input type="number" id="min_rr" value="0" step="0.25"><div class="hint">1 = target at least as far as stop • 0 = off</div></div>
         <div class="f"><label>No new entry after</label><input type="time" id="no_entry_after" value="15:00"><div class="hint"></div></div>
         <div class="f"><label>Square off at</label><input type="time" id="square_off" value="15:15"><div class="hint"></div></div>
@@ -132,7 +134,7 @@ async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){loca
 const post=(u,b)=>api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 const fmt=(v,d=2)=>v==null?'–':Number(v).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});
 const cls=v=>v>0?'pos':v<0?'neg':'';
-const KEYS=['timeframe_min','rsi_period','upper_band','lower_band','level_tol_pct','touch_lookback','max_sl_pct','min_rr','no_entry_after','square_off','charges_pts'];
+const KEYS=['timeframe_min','rsi_period','upper_band','lower_band','level_tol_pct','touch_lookback','max_sl_pct','min_rr','trend_filter','target_mode','no_entry_after','square_off','charges_pts'];
 
 async function loadSyms(){
   try{SYMS=await api('/iifl/api/analysis/symbols')}catch(e){$('symHint').textContent=e.message;return}
@@ -149,9 +151,9 @@ function symChanged(){const s=SYMS.find(x=>String(x.instrumentId)===$('sym').val
 $('sym').addEventListener('change',symChanged);
 
 const PRESETS={
-  video:{label:'RSI 40/60, no reward:risk filter – exactly the video',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.05,touch_lookback:2,max_sl_pct:0.25,min_rr:0,no_entry_after:'15:00',square_off:'15:15',charges_pts:0}},
-  recommended:{label:'Video rules + target must be at least as far as the stop',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.05,touch_lookback:1,max_sl_pct:0.25,min_rr:1,no_entry_after:'14:45',square_off:'15:15',charges_pts:0}},
-  strict:{label:'Tighter level touch, smaller stops, target 1.5× the stop',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.03,touch_lookback:0,max_sl_pct:0.15,min_rr:1.5,no_entry_after:'14:30',square_off:'15:15',charges_pts:0}}
+  video:{label:'RSI 40/60, no reward:risk filter – exactly the video',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.05,touch_lookback:2,max_sl_pct:0.25,min_rr:0,trend_filter:'off',target_mode:'next',no_entry_after:'15:00',square_off:'15:15',charges_pts:0}},
+  recommended:{label:'Video rules + trade only with the daily trend + target at least as far as the stop',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.05,touch_lookback:1,max_sl_pct:0.25,min_rr:1,trend_filter:'daily',target_mode:'next',no_entry_after:'14:45',square_off:'15:15',charges_pts:0}},
+  strict:{label:'15m EMA trend, tighter level touch, smaller stops, target 1.5× the stop',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.03,touch_lookback:0,max_sl_pct:0.15,min_rr:1.5,trend_filter:'ema',target_mode:'next',no_entry_after:'14:30',square_off:'15:15',charges_pts:0}}
 };
 const STORE='camarilla.settings.v1';
 function readSaved(){try{return JSON.parse(localStorage.getItem(STORE)||'null')}catch(e){return null}}
@@ -166,7 +168,7 @@ function applyPreset(name){
   $('preset').value=name;$('presetHint').textContent=label;
 }
 function initPreset(){
-  KEYS.forEach(k=>$(k).addEventListener('input',()=>{if(!applying){$('preset').value='custom';$('presetHint').textContent='Your own values'}}));
+  KEYS.forEach(k=>['input','change'].forEach(ev=>$(k).addEventListener(ev,()=>{if(!applying){$('preset').value='custom';$('presetHint').textContent='Your own values'}})));
   const s=readSaved();
   if(s&&s.preset==='custom'){applyPreset('saved');$('preset').value='custom';$('presetHint').textContent='Your own values (last run)'}
   else applyPreset(s&&PRESETS[s.preset]?s.preset:'recommended');
@@ -201,10 +203,10 @@ function render(r){
 }
 
 async function optimize(){
-  $('optBox').style.display='block';$('optBody').innerHTML='<span class="meta">Testing about 200 combinations… (10–40 s)</span>';
+  $('optBox').style.display='block';$('optBody').innerHTML='<span class="meta">Testing about 1,300 combinations… (a few seconds)</span>';
   try{const o=await post('/iifl/api/camarilla/optimize',body());
     $('optMeta').textContent=`• ${o.meta.symbol} • tune ${o.tune[0]} → ${o.tune[1]} • check ${o.check[0]} → ${o.check[1]} • ${o.tested} tested`;
-    const S=x=>`RSI ${x.lower_band}/${x.upper_band} • R:R ≥ ${x.min_rr} • max stop ${x.max_sl_pct}% • tol ${x.level_tol_pct}% • lookback ${x.touch_lookback}`;
+    const S=x=>`RSI ${x.lower_band}/${x.upper_band} • trend ${x.trend_filter} • target ${x.target_mode} • R:R ≥ ${x.min_rr} • max stop ${x.max_sl_pct}% • tol ${x.level_tol_pct}% • lookback ${x.touch_lookback}`;
     const R=r=>`<td class="num">${r.trades}</td><td class="num">${r.win_rate}%</td><td class="num ${cls(r.net_points)}">${fmt(r.net_points)}</td>`;
     const rows=[`<tr style="background:#0c1426"><td>Your current settings</td><td class="meta">${S(o.current.settings)}</td>${R(o.current.tune)}${R(o.current.check)}<td></td></tr>`]
       .concat(o.best.map((b,i)=>`<tr><td>#${i+1}</td><td>${S(b.settings)}</td>${R(b.tune)}${R(b.check)}<td><button class="secondary" style="padding:5px 10px" onclick='useSettings(${JSON.stringify(b.settings)})'>Use</button></td></tr>`));

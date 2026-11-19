@@ -30,6 +30,8 @@ DEFAULTS = {
     "touch_lookback": 2,       # the level may be touched up to N candles before the RSI cross
     "max_sl_pct": 0.25,        # skip if stop is wider than this % of price (~65 pts at 26,000)
     "min_rr": 0.0,             # skip if (target distance / stop distance) is below this; 0 = off (video rules)
+    "trend_filter": "off",     # off | daily (prev close vs 5-day average) | ema (15m EMA-50 rising/falling)
+    "target_mode": "next",     # next = next level (video) | mid = halfway to the next level
     "no_entry_after": "15:00", # signal candle must close by this time
     "square_off": "15:15",
     "charges_pts": 0.0,        # optional round-trip cost in index points per trade
@@ -154,9 +156,37 @@ def prepare(candles, params=None, prev_day=None, is_trading_day=None):
     p = {**DEFAULTS, **(params or {})}
     bars = resample(candles, p["timeframe_min"])
     rsi = rsi_wilder([b["close"] for b in bars], p["rsi_period"])
-    levels, _, missing = daily_levels(candles, prev_day, is_trading_day)
+    levels, days, missing = daily_levels(candles, prev_day, is_trading_day)
     return {"bars": bars, "rsi": rsi, "levels": levels, "missing": missing,
+            "ema_trend": ema_trend([b["close"] for b in bars]), "daily_trend": daily_trend(days),
             "key": (p["timeframe_min"], p["rsi_period"])}
+
+
+EMA_LEN, EMA_SLOPE_BARS, DAILY_AVG_DAYS = 50, 8, 5
+
+
+def ema_trend(closes):
+    """Per bar: 'up' if EMA-50 is higher than 8 bars ago, 'down' if lower, None while warming up."""
+    out, ema, k = [None] * len(closes), None, 2 / (EMA_LEN + 1)
+    vals = []
+    for i, c in enumerate(closes):
+        ema = c if ema is None else ema + k * (c - ema)
+        vals.append(ema)
+        if i >= EMA_LEN + EMA_SLOPE_BARS:
+            d = vals[i] - vals[i - EMA_SLOPE_BARS]
+            out[i] = "up" if d > 0 else "down" if d < 0 else None
+    return out
+
+
+def daily_trend(days):
+    """Per day: 'up' if the previous day's close is above the average of the 5 closes before today."""
+    keys = list(days)
+    out = {}
+    for k in range(DAILY_AVG_DAYS, len(keys)):
+        closes = [days[keys[j]]["close"] for j in range(k - DAILY_AVG_DAYS, k)]
+        avg = sum(closes) / len(closes)
+        out[keys[k]] = "up" if closes[-1] > avg else "down" if closes[-1] < avg else None
+    return out
 
 
 def _touched(bars, i, level, p):
@@ -169,12 +199,19 @@ def _touched(bars, i, level, p):
     return False
 
 
+def _target(lv, level, nxt, p):
+    t = lv[nxt[level]]
+    return (lv[level] + t) / 2 if p["target_mode"] == "mid" else t
+
+
 def signals(candles, params=None, prev_day=None, prepared=None, is_trading_day=None):
     """All RSI crosses with the decision taken on each. Returns (bars, rsi, levels, signal list)."""
     p = {**DEFAULTS, **(params or {})}
     if prepared is None or prepared["key"] != (p["timeframe_min"], p["rsi_period"]):
         prepared = prepare(candles, p, prev_day, is_trading_day)
     bars, rsi, levels = prepared["bars"], prepared["rsi"], prepared["levels"]
+    trend_of = (lambda i: prepared["ema_trend"][i]) if p["trend_filter"] == "ema" else \
+        (lambda i: prepared["daily_trend"].get(bars[i]["day"])) if p["trend_filter"] == "daily" else (lambda i: None)
     cutoff = _mins(p["no_entry_after"])
     out = []
     for i in range(1, len(bars)):
@@ -196,13 +233,22 @@ def signals(candles, params=None, prev_day=None, prepared=None, is_trading_day=N
         if b["end_min"] > cutoff:
             sig["reason"] = f"after {p['no_entry_after']}"
             continue
+        if p["trend_filter"] != "off":
+            tr = trend_of(i)
+            sig["trend"] = tr
+            if tr is None:
+                sig["reason"] = "trend not known yet"
+                continue
+            if (up and tr == "down") or (down and tr == "up"):
+                sig["reason"] = "against the trend"
+                continue
         if up:
             level = next((k for k in ("S4", "S2") if _touched(bars, i, lv[k], p)), None)
             if not level:
                 sig["reason"] = "at resistance" if any(_touched(bars, i, lv[k], p) for k in ("R2", "R4")) \
                     else "in the air (no level)"
                 continue
-            sl, target = b["low"], lv[NEXT_UP[level]]
+            sl, target = b["low"], _target(lv, level, NEXT_UP, p)
             risk, beyond = b["close"] - sl, b["close"] >= target
         else:
             level = next((k for k in ("R4", "R2") if _touched(bars, i, lv[k], p)), None)
@@ -210,7 +256,7 @@ def signals(candles, params=None, prev_day=None, prepared=None, is_trading_day=N
                 sig["reason"] = "at support" if any(_touched(bars, i, lv[k], p) for k in ("S2", "S4")) \
                     else "in the air (no level)"
                 continue
-            sl, target = b["high"], lv[NEXT_DOWN[level]]
+            sl, target = b["high"], _target(lv, level, NEXT_DOWN, p)
             risk, beyond = sl - b["close"], b["close"] <= target
         sig.update(level=level, sl=round(sl, 2), target=round(target, 2))
         if risk > b["close"] * p["max_sl_pct"] / 100:
@@ -341,6 +387,8 @@ GRID = {
     "max_sl_pct": [0.15, 0.25, 0.4],
     "level_tol_pct": [0.03, 0.05, 0.1],
     "touch_lookback": [0, 2],
+    "trend_filter": ["off", "daily", "ema"],
+    "target_mode": ["next", "mid"],
 }
 MIN_TUNE_TRADES = 6
 
@@ -370,7 +418,8 @@ def optimize(candles, base, tune, check, grid=GRID, top=10, is_trading_day=None)
         return {k: s[k] for k in ("trades", "win_rate", "net_points", "max_drawdown_points", "avg_win", "avg_loss")}
 
     def settings(p):
-        return {k: p[k] for k in ("lower_band", "upper_band", "min_rr", "max_sl_pct", "level_tol_pct", "touch_lookback")}
+        return {k: p[k] for k in ("lower_band", "upper_band", "min_rr", "max_sl_pct", "level_tol_pct", "touch_lookback",
+                                  "trend_filter", "target_mode")}
 
     video = backtest(candles, p0, trade_from=tune[0], trade_to=tune[1], prepared=prep)["summary"]
     video_check = backtest(candles, p0, trade_from=check[0], trade_to=check[1], prepared=prep)["summary"]

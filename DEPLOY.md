@@ -175,6 +175,8 @@ Analysis only – no orders, no change to the live engine. Rules: Camarilla S2/S
 
 Improvements: **Min reward : risk** setting (skip trades whose target is closer than the stop), a data-gap guard (no pivots from an older day when a trading day is missing; Muhurat-style special sessions ignored) and **Optimise settings** (tests ~200 combinations on the first ⅔ of the dates, shows how the best ones did on the last ⅓).
 
+Trend filter (daily: yesterday's close vs 5-day average; or 15m EMA-50 slope) and a halfway-target option are also in the settings and in Optimise (~1,300 combinations).
+
 Data: on the Analysis page add **NIFTY** (or **NIFTYBEES** if IIFL can't find the index in the equity list) and fetch 1–3 months. Then open 🎯 Camarilla → Run backtest, or **Check now** during market hours (needs the IIFL login).
 
 ```bash

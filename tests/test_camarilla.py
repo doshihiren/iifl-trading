@@ -136,6 +136,30 @@ class CamarillaTests(unittest.TestCase):
         for b in o["best"]:
             self.assertIn(b["settings"]["min_rr"], (0, 1))
 
+    def test_trend_filter_blocks_trades_against_trend(self):
+        data = synth(days=40)
+        for mode in ("daily", "ema"):
+            bars, _, _, sigs = cs.signals(data, {"trend_filter": mode})
+            for s in sigs:
+                if s["taken"]:
+                    self.assertEqual(s["trend"], "up" if s["side"] == "BUY" else "down")
+            self.assertTrue(any(s["reason"] == "against the trend" for s in sigs))
+
+    def test_mid_target_is_halfway(self):
+        data = synth(days=30)
+        _, _, levels, sigs = cs.signals(data, {"target_mode": "mid"})
+        for s in sigs:
+            if s["taken"]:
+                lv = levels[s["ts"][:10]]
+                nxt = (cs.NEXT_UP if s["side"] == "BUY" else cs.NEXT_DOWN)[s["level"]]
+                self.assertAlmostEqual(s["target"], round((lv[s["level"]] + lv[nxt]) / 2, 2), places=2)
+
+    def test_daily_trend(self):
+        days = {f"2026-09-{d:02d}": {"close": c} for d, c in zip(range(1, 8), [10, 11, 12, 13, 14, 15, 9])}
+        t = cs.daily_trend(days)
+        self.assertEqual(t["2026-09-06"], "up")      # 14 > avg(10..14)
+        self.assertNotIn("2026-09-05", t)            # not enough history
+
 
 if __name__ == "__main__":
     unittest.main()

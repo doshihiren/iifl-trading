@@ -49,6 +49,12 @@ def _params(body):
         "min_rr": f("min_rr", 0, 5),
         "charges_pts": f("charges_pts", 0, 100),
     }
+    p["trend_filter"] = str(body.get("trend_filter") or cs.DEFAULTS["trend_filter"])
+    p["target_mode"] = str(body.get("target_mode") or cs.DEFAULTS["target_mode"])
+    if p["trend_filter"] not in ("off", "daily", "ema"):
+        raise ValueError("Trend filter must be off, daily or ema")
+    if p["target_mode"] not in ("next", "mid"):
+        raise ValueError("Target must be next or mid")
     if p["timeframe_min"] not in (5, 15, 30):
         raise ValueError("Timeframe must be 5, 15 or 30 minutes")
     for k in ("no_entry_after", "square_off"):
