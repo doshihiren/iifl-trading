@@ -62,9 +62,16 @@
       <div class="f"><label>Script (data from the Analysis page)</label><select id="sym"></select><div class="hint" id="symHint"></div></div>
       <div class="f"><label>From</label><input type="date" id="from"><div class="hint"></div></div>
       <div class="f"><label>To</label><input type="date" id="to"><div class="hint"></div></div>
+      <div class="f"><label>Preset</label><select id="preset" onchange="applyPreset(this.value)">
+        <option value="recommended">Recommended (filters bad trades)</option>
+        <option value="video">Video rules (as shown)</option>
+        <option value="strict">Strict (fewer, cleaner trades)</option>
+        <option value="saved">My saved settings</option>
+        <option value="custom">Custom</option>
+      </select><div class="hint" id="presetHint"></div></div>
       <div class="f"><label>Timeframe (min)</label><select id="timeframe_min"><option>5</option><option selected>15</option><option>30</option></select><div class="hint">Video uses 15</div></div>
     </div>
-    <details><summary>Rule settings (defaults match the video)</summary>
+    <details><summary>Rule settings (filled by the preset – change any value to make it Custom)</summary>
       <div class="grid">
         <div class="f"><label>RSI length</label><input type="number" id="rsi_period" value="21"><div class="hint"></div></div>
         <div class="f"><label>RSI upper band</label><input type="number" id="upper_band" value="60"><div class="hint"></div></div>
@@ -141,9 +148,34 @@ function symChanged(){const s=SYMS.find(x=>String(x.instrumentId)===$('sym').val
   $('from').value=first.toISOString().slice(0,10);$('to').value=s.last.slice(0,10)}
 $('sym').addEventListener('change',symChanged);
 
+const PRESETS={
+  video:{label:'RSI 40/60, no reward:risk filter – exactly the video',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.05,touch_lookback:2,max_sl_pct:0.25,min_rr:0,no_entry_after:'15:00',square_off:'15:15',charges_pts:0}},
+  recommended:{label:'Video rules + target must be at least as far as the stop',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.05,touch_lookback:1,max_sl_pct:0.25,min_rr:1,no_entry_after:'14:45',square_off:'15:15',charges_pts:0}},
+  strict:{label:'Tighter level touch, smaller stops, target 1.5× the stop',v:{timeframe_min:15,rsi_period:21,upper_band:60,lower_band:40,level_tol_pct:0.03,touch_lookback:0,max_sl_pct:0.15,min_rr:1.5,no_entry_after:'14:30',square_off:'15:15',charges_pts:0}}
+};
+const STORE='camarilla.settings.v1';
+function readSaved(){try{return JSON.parse(localStorage.getItem(STORE)||'null')}catch(e){return null}}
+function saveSettings(){try{const v={};KEYS.forEach(k=>v[k]=$(k).value);localStorage.setItem(STORE,JSON.stringify({preset:$('preset').value,v}))}catch(e){}}
+let applying=false;
+function applyPreset(name){
+  let v=null,label='';
+  if(name==='saved'){const s=readSaved();if(!s){$('presetHint').textContent='Nothing saved yet – run a backtest first';return}v=s.v;label='Settings from your last run'}
+  else if(PRESETS[name]){v=PRESETS[name].v;label=PRESETS[name].label}
+  else{$('presetHint').textContent='Your own values';return}
+  applying=true;Object.entries(v).forEach(([k,x])=>{if($(k))$(k).value=x});applying=false;
+  $('preset').value=name;$('presetHint').textContent=label;
+}
+function initPreset(){
+  KEYS.forEach(k=>$(k).addEventListener('input',()=>{if(!applying){$('preset').value='custom';$('presetHint').textContent='Your own values'}}));
+  const s=readSaved();
+  if(s&&s.preset==='custom'){applyPreset('saved');$('preset').value='custom';$('presetHint').textContent='Your own values (last run)'}
+  else applyPreset(s&&PRESETS[s.preset]?s.preset:'recommended');
+}
+
 function body(){const b={instrumentId:$('sym').value,from:$('from').value,to:$('to').value};KEYS.forEach(k=>b[k]=$(k).value);return b}
 
 async function run(){
+  saveSettings();
   $('msg').textContent='Running…';$('msg').className='meta';
   try{const r=await post('/iifl/api/camarilla/run',body());render(r);$('msg').textContent=''}
   catch(e){$('msg').textContent=e.message;$('msg').className='err'}
@@ -181,7 +213,7 @@ async function optimize(){
       +`<div class="scroll"><table><tr><th></th><th>Settings</th><th class="num">Tune trades</th><th class="num">Tune win</th><th class="num">Tune pts</th><th class="num">Check trades</th><th class="num">Check win</th><th class="num">Check pts</th><th></th></tr>${rows.join('')}</table></div>`;
   }catch(e){$('optBody').innerHTML=`<span class="err">${e.message}</span>`}
 }
-function useSettings(x){Object.entries(x).forEach(([k,v])=>{if($(k))$(k).value=v});document.querySelector('details').open=true;run()}
+function useSettings(x){applying=true;Object.entries(x).forEach(([k,v])=>{if($(k))$(k).value=v});applying=false;$('preset').value='custom';$('presetHint').textContent='From Optimise';document.querySelector('details').open=true;run()}
 
 async function checkNow(){
   $('nowBox').style.display='block';$('nowBody').innerHTML='<span class="meta">Checking…</span>';
@@ -197,6 +229,7 @@ async function checkNow(){
       +(n.nearest?`<p class="meta">Nearest level: ${n.nearest.level} (${n.nearest.distance>0?'+':''}${fmt(n.nearest.distance)} from price)</p>`:'');
   }catch(e){$('nowBody').innerHTML=`<span class="err">${e.message}</span>`}
 }
+initPreset();
 loadSyms();
 </script>
 </body>
