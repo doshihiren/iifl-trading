@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Camarilla + RSI</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#121a2e;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--blue:#6ea8fe;--good:#32d583;--bad:#ff6b6b;--warn:#ffd98a}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#08101f,#0f1730);font-family:Inter,system-ui,Arial,sans-serif;color:var(--text)}
+    .wrap{max-width:1300px;margin:auto;padding:24px 18px 60px}
+    .top{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap}
+    h1{font-size:26px;margin:0 0 4px}.sub{color:var(--muted);margin:0;font-size:14px}
+    .nav{display:flex;gap:14px;flex-wrap:wrap}.nav a{color:var(--blue);text-decoration:none;font-weight:700;font-size:14px}
+    .card{background:rgba(18,26,46,.95);border:1px solid var(--line);border-radius:18px;padding:18px 20px;margin-bottom:16px}
+    h2{font-size:17px;margin:0 0 14px}
+    .step{display:inline-block;background:#24365e;color:#cfe0ff;border-radius:999px;width:24px;height:24px;text-align:center;line-height:24px;font-size:13px;margin-right:8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;align-items:end}
+    .f{display:flex;flex-direction:column;gap:6px;min-width:0}.f label{font-size:11px;color:var(--muted)}
+    .hint{font-size:11px;color:#b9d2ff;min-height:14px}
+    input,select{width:100%;background:#0d1528;color:var(--text);border:1px solid #30405f;border-radius:10px;padding:9px 11px;font-size:13px;outline:none;color-scheme:dark}
+    input:focus,select:focus{border-color:var(--blue)}
+    button{border:0;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer;font-size:13px}
+    .go{background:var(--good);color:#052718}.secondary{background:#202d49;color:var(--text)}
+    details summary{cursor:pointer;color:var(--muted);font-size:12px;margin:12px 0 4px}
+    table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+    th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+    th{color:var(--muted);font-weight:600;position:sticky;top:0;background:#121a2e}
+    td.num,th.num{text-align:right}.scroll{overflow:auto;max-height:520px}
+    .meta{color:var(--muted);font-size:12px}.pos{color:var(--good)}.neg{color:var(--bad)}.err{color:#ff9da4}.warnc{color:var(--warn)}
+    .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+    .kv div{background:#0d1528;border:1px solid var(--line);border-radius:12px;padding:11px}.kv b{display:block;font-size:18px}.kv span{color:var(--muted);font-size:11px}
+    .rules{font-size:13px;line-height:1.7;color:#cdd8ee;background:#0c1426;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+    .rules b.buy{color:var(--good)}.rules b.sell{color:var(--bad)}
+    .chips{display:flex;flex-wrap:wrap;gap:8px}.chip{background:#0d1528;border:1px solid var(--line);border-radius:999px;padding:6px 11px;font-size:12px}
+    .signal{font-size:16px;font-weight:800;padding:12px 14px;border-radius:12px;margin-top:10px}
+    .signal.buy{background:rgba(50,213,131,.12);border:1px solid var(--good)}.signal.sell{background:rgba(255,107,107,.12);border:1px solid var(--bad)}
+    .signal.none{background:#0c1426;border:1px solid var(--line);font-weight:600;font-size:14px;color:var(--muted)}
+    .lv{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+    .lv div{background:#0d1528;border:1px solid var(--line);border-radius:10px;padding:9px;text-align:center}.lv span{display:block;font-size:11px;color:var(--muted)}
+    .lv .r{border-top:3px solid var(--bad)}.lv .s{border-top:3px solid var(--good)}.lv .near{outline:2px solid var(--blue)}
+    #results{display:none}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>🎯 Camarilla + RSI</h1><p class="sub">Price from Camarilla S2/S4/R2/R4 • direction from RSI 21 (40/60) • analysis only, never places orders</p></div>
+    <div class="nav"><a href="/iifl/analysis">🔬 Analysis</a><a href="/iifl/analysis-rsi">📈 RSI Analysis</a><a href="/iifl/strategy-lab">🧪 Strategy Lab</a><a href="/iifl/reports">📊 Reports</a><a href="/iifl/">← Dashboard</a></div>
+  </div>
+
+  <div class="card">
+    <div class="rules">
+      <b class="buy">BUY (ATM CE)</b>: RSI goes below 40 and closes back above 40, and the candle is at <b>S2 or S4</b>. Stop = candle low. Target = next line up (S4→S2, S2→R2).<br>
+      <b class="sell">SELL (ATM PE)</b>: RSI goes above 60 and closes back below 60, and the candle is at <b>R2 or R4</b>. Stop = candle high. Target = next line down (R4→R2, R2→S2).<br>
+      <span class="meta">No trade when a buy signal comes at resistance, a sell signal at support, price is "in the air" (no level touched), or the stop is too wide. Pivots come from the previous day's high/low/close.</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">1</span>Script &amp; settings</h2>
+    <div class="grid">
+      <div class="f"><label>Script (data from the Analysis page)</label><select id="sym"></select><div class="hint" id="symHint"></div></div>
+      <div class="f"><label>From</label><input type="date" id="from"><div class="hint"></div></div>
+      <div class="f"><label>To</label><input type="date" id="to"><div class="hint"></div></div>
+      <div class="f"><label>Timeframe (min)</label><select id="timeframe_min"><option>5</option><option selected>15</option><option>30</option></select><div class="hint">Video uses 15</div></div>
+    </div>
+    <details><summary>Rule settings (defaults match the video)</summary>
+      <div class="grid">
+        <div class="f"><label>RSI length</label><input type="number" id="rsi_period" value="21"><div class="hint"></div></div>
+        <div class="f"><label>RSI upper band</label><input type="number" id="upper_band" value="60"><div class="hint"></div></div>
+        <div class="f"><label>RSI lower band</label><input type="number" id="lower_band" value="40"><div class="hint"></div></div>
+        <div class="f"><label>"At the level" tolerance %</label><input type="number" id="level_tol_pct" value="0.05" step="0.01"><div class="hint">0.05% ≈ 13 Nifty pts</div></div>
+        <div class="f"><label>Touch lookback (candles)</label><input type="number" id="touch_lookback" value="2"><div class="hint">Level touched before the RSI cross</div></div>
+        <div class="f"><label>Max stop %</label><input type="number" id="max_sl_pct" value="0.25" step="0.05"><div class="hint">0.25% ≈ 65 Nifty pts</div></div>
+        <div class="f"><label>No new entry after</label><input type="time" id="no_entry_after" value="15:00"><div class="hint"></div></div>
+        <div class="f"><label>Square off at</label><input type="time" id="square_off" value="15:15"><div class="hint"></div></div>
+        <div class="f"><label>Charges (points / trade)</label><input type="number" id="charges_pts" value="0" step="0.5"><div class="hint">Optional cost per round trip</div></div>
+      </div>
+    </details>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button class="go" onclick="run()">Run backtest</button>
+      <button class="secondary" onclick="checkNow()">Check now (live)</button>
+      <span class="meta" id="msg" style="align-self:center"></span>
+    </div>
+    <p class="meta" style="margin-top:12px">No script yet? On the <a href="/iifl/analysis" style="color:var(--blue)">Analysis page</a> add <b>NIFTY</b> (if IIFL can't find the index there, use <b>NIFTYBEES</b> – the signals are % based so the pattern is the same). Fetch at least 1 month.</p>
+  </div>
+
+  <div class="card" id="nowBox" style="display:none">
+    <h2><span class="step">2</span>Right now</h2>
+    <div id="nowBody"></div>
+  </div>
+
+  <div id="results">
+    <div class="card">
+      <h2><span class="step">3</span>Backtest result <span class="meta" id="metaLine"></span></h2>
+      <div class="kv" id="kv"></div>
+      <p class="meta" id="note"></p>
+      <h2 style="margin-top:16px;font-size:14px">Why signals were skipped</h2>
+      <div class="chips" id="skips"></div>
+    </div>
+    <div class="card">
+      <h2>Trades</h2>
+      <div class="scroll"><table id="trades"></table></div>
+    </div>
+    <div class="card">
+      <details><summary>All RSI crosses and the decision on each</summary>
+        <div class="scroll"><table id="sigs"></table></div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);let SYMS=[];
+async function readJson(r){try{return await r.json()}catch(e){return{message:'Server error ('+r.status+')'}}}
+async function api(url,opt){const r=await fetch(url,opt);if(r.status===401){location.href='/iifl/auth/login';throw new Error('login')}const d=await readJson(r);if(!r.ok||d.status==='error')throw new Error(d.message||'Request failed');return d.result}
+const post=(u,b)=>api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+const fmt=(v,d=2)=>v==null?'–':Number(v).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});
+const cls=v=>v>0?'pos':v<0?'neg':'';
+const KEYS=['timeframe_min','rsi_period','upper_band','lower_band','level_tol_pct','touch_lookback','max_sl_pct','no_entry_after','square_off','charges_pts'];
+
+async function loadSyms(){
+  try{SYMS=await api('/iifl/api/analysis/symbols')}catch(e){$('symHint').textContent=e.message;return}
+  const withData=SYMS.filter(s=>s.candles>0);
+  if(!withData.length){$('sym').innerHTML='<option value="">– no data yet –</option>';$('symHint').textContent='Add NIFTY on the Analysis page';return}
+  $('sym').innerHTML=withData.map(s=>`<option value="${s.instrumentId}">${s.symbol}</option>`).join('');
+  const pref=withData.find(s=>/NIFTY/.test(s.symbol));if(pref)$('sym').value=pref.instrumentId;
+  symChanged();
+}
+function symChanged(){const s=SYMS.find(x=>String(x.instrumentId)===$('sym').value);if(!s)return;
+  $('symHint').textContent=`${s.days} days • ${s.first.slice(0,10)} → ${s.last.slice(0,10)}`;
+  const first=new Date(s.first.slice(0,10));first.setDate(first.getDate()+3);
+  $('from').value=first.toISOString().slice(0,10);$('to').value=s.last.slice(0,10)}
+$('sym').addEventListener('change',symChanged);
+
+function body(){const b={instrumentId:$('sym').value,from:$('from').value,to:$('to').value};KEYS.forEach(k=>b[k]=$(k).value);return b}
+
+async function run(){
+  $('msg').textContent='Running…';$('msg').className='meta';
+  try{const r=await post('/iifl/api/camarilla/run',body());render(r);$('msg').textContent=''}
+  catch(e){$('msg').textContent=e.message;$('msg').className='err'}
+}
+
+function render(r){
+  $('results').style.display='block';const s=r.summary;
+  $('metaLine').textContent=`• ${r.meta.symbol} • ${r.meta.from} → ${r.meta.to.slice(0,10)}`;
+  $('note').textContent=r.meta.note||'Points are index points per unit (entry at signal candle close; stops and targets checked every minute). Option P&L will differ (premium, delta, decay).';
+  $('kv').innerHTML=[
+    ['Trades',s.trades,''],['Win rate',s.win_rate+'%',''],['Net points',fmt(s.net_points),cls(s.net_points)],
+    ['Avg win',fmt(s.avg_win),'pos'],['Avg loss',fmt(s.avg_loss),'neg'],['Max drawdown (pts)',fmt(s.max_drawdown_points),'neg'],
+    ['Days with a trade',s.days_traded,''],['RSI crosses seen',s.rsi_crosses,'']
+  ].map(([k,v,c])=>`<div><b class="${c}">${v}</b><span>${k}</span></div>`).join('');
+  const sk=Object.entries(s.skipped).sort((a,b)=>b[1]-a[1]);
+  $('skips').innerHTML=sk.length?sk.map(([k,v])=>`<span class="chip">${k}: <b>${v}</b></span>`).join(''):'<span class="meta">None</span>';
+  $('trades').innerHTML='<tr><th>Date</th><th>Entry</th><th>Side</th><th>Level</th><th>Option</th><th class="num">RSI</th><th class="num">Entry px</th><th class="num">Stop</th><th class="num">Target</th><th>Exit</th><th class="num">Exit px</th><th>Reason</th><th class="num">Points</th></tr>'+
+    (r.trades.length?r.trades.slice().reverse().map(t=>`<tr><td>${t.date}</td><td>${t.entry_time}</td><td class="${t.side==='BUY'?'pos':'neg'}">${t.side}</td><td>${t.level}</td><td>${t.option}</td><td class="num">${t.rsi}</td><td class="num">${fmt(t.entry)}</td><td class="num">${fmt(t.sl)}</td><td class="num">${fmt(t.target)}</td><td>${t.exit_time}</td><td class="num">${fmt(t.exit)}</td><td>${t.exit_reason}</td><td class="num ${cls(t.points)}">${fmt(t.points)}</td></tr>`).join(''):'<tr><td colspan="13" class="meta">No trades in this period</td></tr>');
+  $('sigs').innerHTML='<tr><th>Candle</th><th>Closes</th><th>Side</th><th class="num">RSI</th><th class="num">Close</th><th>Level</th><th>Decision</th></tr>'+
+    r.signals.slice().reverse().map(g=>`<tr><td>${g.ts}</td><td>${g.close_time}</td><td>${g.side}</td><td class="num">${g.rsi}</td><td class="num">${fmt(g.entry)}</td><td>${g.level||'–'}</td><td class="${g.taken?'pos':'meta'}">${g.taken?'TRADE':g.reason+(g.sl_points?` (${g.sl_points} pts)`:'')}</td></tr>`).join('');
+}
+
+async function checkNow(){
+  $('nowBox').style.display='block';$('nowBody').innerHTML='<span class="meta">Checking…</span>';
+  try{const n=await post('/iifl/api/camarilla/now',body());
+    const L=n.levels||{};const near=n.nearest?n.nearest.level:'';
+    const lv=n.levels?`<div class="lv">${['R4','R2','S2','S4'].map(k=>`<div class="${k[0]==='R'?'r':'s'} ${k===near?'near':''}"><span>${k}</span><b>${fmt(L[k])}</b></div>`).join('')}</div>`:'<p class="warnc">No pivots for today yet (need the previous day in the data).</p>';
+    let sig='<div class="signal none">No signal on the last completed candle. Wait for RSI to cross back through 40 at S2/S4, or through 60 at R2/R4.</div>';
+    if(n.signal){const g=n.signal;sig=g.taken
+      ?`<div class="signal ${g.side==='BUY'?'buy':'sell'}">${g.side==='BUY'?'BUY – ATM CE':'SELL – ATM PE'} at ${g.level} • entry ${fmt(g.entry)} • stop ${fmt(g.sl)} • target ${fmt(g.target)} <span class="meta">(candle ${g.ts.slice(11)}–${g.close_time})</span></div>`
+      :`<div class="signal none">RSI ${g.side==='BUY'?'up':'down'}-cross on ${g.ts.slice(11)} candle, skipped: <b>${g.reason}</b></div>`}
+    $('nowBody').innerHTML=`<div class="meta">${n.symbol} • last price ${fmt(n.price)} • RSI ${n.rsi} (prev ${n.rsi_prev??'–'}) • last completed candle ${n.last_bar.slice(11)}–${n.last_bar_close_time} • ${n.source} • checked ${n.checked_at}</div>`
+      +(n.live_note?`<p class="warnc">${n.live_note}</p>`:'')+lv+sig
+      +(n.nearest?`<p class="meta">Nearest level: ${n.nearest.level} (${n.nearest.distance>0?'+':''}${fmt(n.nearest.distance)} from price)</p>`:'');
+  }catch(e){$('nowBody').innerHTML=`<span class="err">${e.message}</span>`}
+}
+loadSyms();
+</script>
+</body>
+</html>

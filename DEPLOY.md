@@ -168,3 +168,18 @@ python -m unittest tests.test_rsi_analysis
 systemctl restart iifl-web
 curl -s -o /dev/null -w "RSI page HTTP %{http_code}\n" http://127.0.0.1:5015/iifl/analysis-rsi   # 401 = OK (login required)
 ```
+
+## Camarilla + RSI tab (`/iifl/camarilla`)
+
+Analysis only – no orders, no change to the live engine. Rules: Camarilla S2/S4 (buy) and R2/R4 (sell) from the previous day, direction from RSI 21 crossing back through 40 / 60, stop at the signal candle's low/high, target at the next level, 15-minute candles.
+
+Data: on the Analysis page add **NIFTY** (or **NIFTYBEES** if IIFL can't find the index in the equity list) and fetch 1–3 months. Then open 🎯 Camarilla → Run backtest, or **Check now** during market hours (needs the IIFL login).
+
+```bash
+cd /root/iifl && source venv/bin/activate
+git pull --ff-only origin main
+python -m py_compile *.py
+python -m unittest tests.test_camarilla
+systemctl restart iifl-web
+curl -s -o /dev/null -w "Camarilla page HTTP %{http_code}\n" http://127.0.0.1:5015/iifl/camarilla   # 302/401 = OK (login required)
+```

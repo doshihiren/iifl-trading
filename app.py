@@ -1235,6 +1235,10 @@ import swing_page  # noqa: E402
 
 app.register_blueprint(swing_page.bp)
 
+# ---- Camarilla + RSI (analysis only, separate page) ----
+import camarilla_page  # noqa: E402
+app.register_blueprint(camarilla_page.bp)
+
 
 if __name__ == "__main__":
 
