@@ -1231,6 +1231,9 @@ app.register_blueprint(technical_summary.bp)
 import strategy_lab  # noqa: E402
 app.register_blueprint(strategy_lab.bp)
 
+import camarilla_rsi  # noqa: E402
+app.register_blueprint(camarilla_rsi.bp)
+
 import swing_page  # noqa: E402
 
 app.register_blueprint(swing_page.bp)
