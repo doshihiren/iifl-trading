@@ -203,3 +203,185 @@ def job(job_id):
     if not j:
         return _err("Job not found (the web app may have restarted)", 404)
     return jsonify({"status": "Ok", "result": {k: v for k, v in j.items() if k != "started"}})
+
+
+# ===== Hedged Options Research (separate routes; NO broker order calls) =====
+import csv as _option_csv
+import io as _option_io
+import math as _option_math
+from datetime import datetime as _option_datetime, date as _option_date
+from flask import render_template_string as _option_html
+
+_OPTION_COLUMNS = {"timestamp","symbol","expiry","strike","type","bid","ask",
+                   "lot_size","spot_close","ema20","ema50","rsi21","adx14","vwap"}
+
+def _option_parse(data):
+    if len(data)>15_000_000:
+        raise ValueError("File exceeds 15 MB")
+    reader=_option_csv.DictReader(_option_io.StringIO(data.decode("utf-8-sig")))
+    if not reader.fieldnames or not _OPTION_COLUMNS.issubset(reader.fieldnames):
+        raise ValueError("Missing CSV columns: "+", ".join(sorted(_OPTION_COLUMNS)))
+    snapshots={}
+    for n,row in enumerate(reader,2):
+        if n>100002: raise ValueError("Maximum 100000 option quote rows")
+        ts=_option_datetime.strptime(row["timestamp"],"%Y-%m-%d %H:%M")
+        exp=_option_date.fromisoformat(row["expiry"])
+        symbol=row["symbol"].strip().upper().replace(" ","")
+        typ=row["type"].upper()
+        if symbol not in ("NIFTY","BANKNIFTY") or typ not in ("PE","CE") or exp<ts.date():
+            raise ValueError("Bad symbol, type or expiry on row "+str(n))
+        time=ts.strftime("%H:%M")
+        if not "09:15"<=time<="15:15" or (ts.minute-15)%15:
+            raise ValueError("Expected 15-minute IST timestamps on row "+str(n))
+        fields={k:float(row[k]) for k in
+                ("strike","bid","ask","spot_close","ema20","ema50","rsi21","adx14","vwap")}
+        if not all(_option_math.isfinite(v) for v in fields.values()):
+            raise ValueError("Non-finite numeric field on row "+str(n))
+        bid,ask=fields["bid"],fields["ask"]
+        lot=int(row["lot_size"])
+        if bid<0 or ask<=0 or ask<bid or lot<=0:
+            raise ValueError("Invalid quote/lot size on row "+str(n))
+        key=(symbol,ts.strftime("%Y-%m-%d %H:%M"))
+        bucket=snapshots.setdefault(key,{"spot":None,"contracts":{}})
+        spot={k:fields[k] for k in ("spot_close","ema20","ema50","rsi21","adx14","vwap")}
+        if bucket["spot"] is not None and bucket["spot"]!=spot:
+            raise ValueError("Different underlying indicators at same timestamp "+str(key))
+        bucket["spot"]=spot
+        contract=(row["expiry"],typ,fields["strike"])
+        if contract in bucket["contracts"]:
+            raise ValueError("Duplicate quote "+str(contract))
+        bucket["contracts"][contract]={"bid":bid,"ask":ask,"lot":lot}
+    if not snapshots: raise ValueError("CSV is empty")
+    return snapshots
+
+def _option_trend(s):
+    if s["adx14"]<20:return None
+    if s["ema20"]>s["ema50"] and s["spot_close"]>s["vwap"] and 55<=s["rsi21"]<=70:
+        return "BULLISH"
+    if s["ema20"]<s["ema50"] and s["spot_close"]<s["vwap"] and 30<=s["rsi21"]<=45:
+        return "BEARISH"
+    return None
+
+def _option_strikes(chain,spot,date_str,bias,capital,risk_pct,fee):
+    if bias not in ("BULLISH","BEARISH"):return []
+    kind="PE" if bias=="BULLISH" else "CE"
+    expiries=sorted({e for e,t,k in chain if t==kind
+                     and 2<=(_option_date.fromisoformat(e)-_option_date.fromisoformat(date_str)).days<=35})
+    if not expiries:return []
+    expiry=expiries[0]
+    rows=sorted((k,q) for (e,t,k),q in chain.items() if e==expiry and t==kind)
+    candidates=[]
+    for strike,short in rows:
+        if (kind=="PE" and strike>=spot) or (kind=="CE" and strike<=spot):continue
+        for hedge,long in rows:
+            if (kind=="PE" and hedge>=strike) or (kind=="CE" and hedge<=strike):continue
+            if short["lot"]!=long["lot"]:continue
+            width=abs(strike-hedge)
+            credit=short["bid"]-long["ask"]
+            if width>1500 or not 0<credit<width:continue
+            lot=short["lot"]
+            max_loss=(width-credit)*lot
+            if max_loss>capital*risk_pct/100:continue
+            reward=credit*lot*.60-4*fee
+            planned_risk=credit*lot*.25+4*fee
+            if reward<=0 or planned_risk<=0 or reward/planned_risk<2:continue
+            candidates.append({"expiry":expiry,"type":kind,"short_strike":strike,
+                "hedge_strike":hedge,"lot":lot,"credit":round(credit,3),
+                "max_theoretical_loss":round(max_loss,2),
+                "planned_net_rr":round(reward/planned_risk,2)})
+    return sorted(candidates,key=lambda p:(-p["planned_net_rr"],p["max_theoretical_loss"]))[:20]
+
+def _option_exit_debit(chain,position):
+    typ=position["type"];exp=position["expiry"]
+    short=chain.get((exp,typ,position["short_strike"]))
+    long=chain.get((exp,typ,position["hedge_strike"]))
+    return max(0,short["ask"]-long["bid"]) if short and long else None
+
+def _option_run(snapshots,symbol,capital,risk_pct,fee):
+    if symbol not in ("NIFTY","BANKNIFTY") or not 10000<=capital<=1e8 or not .1<=risk_pct<=2 or not 0<=fee<=1000:
+        raise ValueError("Invalid parameters")
+    keys=sorted(k for k in snapshots if k[0]==symbol)
+    if len(keys)<50: raise ValueError("Need at least 50 time snapshots for this index")
+    trades=[];unpriced=[];position=None;entered=set();signal_count=0
+    for i,key in enumerate(keys):
+        ts=key[1];day,time=ts.split(" ")
+        current=snapshots[key]
+        if position and day!=position["entry_ts"][:10]:
+            unpriced.append({**position,"status":"MISSED_EOD_NO_OVERNIGHT_CARRY"})
+            position=None
+        if position and ts!=position["entry_ts"]:
+            debit=_option_exit_debit(current["contracts"],position)
+            if debit is None:
+                if time>="15:15" or day!=position["entry_ts"][:10]:
+                    unpriced.append(position);position=None
+                continue
+            credit=position["credit"]
+            reason="TARGET" if debit<=credit*.40 else "STOP" if debit>=credit*1.25 else "EOD" if time>="15:15" else None
+            if reason:
+                pnl=round((credit-debit)*position["lot"]-4*fee,2)
+                trades.append({**position,"exit_ts":ts,"exit_debit":round(debit,3),
+                               "reason":reason,"net_pnl":pnl})
+                position=None
+        if position is None and day not in entered and i>0 and "10:00"<=time<="11:30":
+            previous_key=keys[i-1]
+            if previous_key[1][:10]==day:
+                bias=_option_trend(snapshots[previous_key]["spot"])
+                if bias:
+                    signal_count+=1
+                    strikes=_option_strikes(current["contracts"],current["spot"]["spot_close"],
+                                            day,bias,capital,risk_pct,fee)
+                    if strikes:
+                        position={**strikes[0],"bias":bias,"entry_ts":ts}
+                        entered.add(day)
+    if position:unpriced.append(position)
+    winners=sum(t["net_pnl"]>0 for t in trades)
+    gains=sum(max(0,t["net_pnl"]) for t in trades)
+    losses=-sum(min(0,t["net_pnl"]) for t in trades)
+    last=keys[-1];last_spot=snapshots[last]["spot"]
+    guidance=_option_strikes(snapshots[last]["contracts"],last_spot["spot_close"],
+                             last[1][:10],_option_trend(last_spot),capital,risk_pct,fee)
+    return {"summary":{"index":symbol,"snapshot_count":len(keys),"entry_signals":signal_count,
+            "closed_trades":len(trades),"winners":winners,
+            "win_rate_pct":round(100*winners/len(trades),2) if trades else None,
+            "total_net_pnl":round(sum(t["net_pnl"] for t in trades),2),
+            "profit_factor":round(gains/losses,3) if losses else None,
+            "unpriced_exits":len(unpriced)},"trades":trades[:1000],
+            "unpriced":unpriced[:100],"historical_strike_guidance":guidance,
+            "as_of":last[1],"caveat":"Research-only snapshot fills; missing quotes and intra-bar fills not modeled."}
+
+@bp.get("/iifl/hedged-options")
+def hedged_options_page():
+    return _option_html("""<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<title>IIFL Hedged Options</title><style>body{font:15px system-ui;background:#111e31;color:#e8efff;max-width:1050px;margin:30px auto;padding:15px}
+input,select,button{padding:10px;margin:7px;background:#263d58;color:white;border:1px solid #68809d;border-radius:7px}
+button{background:#1766bb;cursor:pointer}pre{white-space:pre-wrap;overflow:auto;background:#1a2c44;padding:18px;border-radius:10px}</style></head>
+<body><a href="/iifl/" style="color:#9dbfff">Dashboard</a><h1>Hedged Options Research Bot</h1>
+<p>NIFTY / BANKNIFTY • Credit spread • Planned 1:2 RR • PAPER & BACKTEST ONLY</p>
+<p>CSV format: timestamp, symbol, expiry, strike, type, bid, ask, lot_size, spot_close, ema20, ema50, rsi21, adx14, vwap</p>
+<p>Use genuine historical contract bid/ask snapshots. Never assume these are live executable prices.</p>
+<form id="f"><input type="file" name="file" accept=".csv" required>
+<select name="symbol"><option>NIFTY</option><option>BANKNIFTY</option></select>
+<label>Capital ₹<input name="capital" type="number" value="500000" min="10000"></label>
+<label>Risk %<input name="risk_pct" type="number" value="1" step=".1" min=".1" max="2"></label>
+<label>Per-order fee ₹<input name="fee" type="number" value="20" min="0"></label><button>Run Backtest</button></form>
+<pre id="out">Upload option snapshots to begin.</pre>
+<script>document.getElementById("f").onsubmit=async e=>{e.preventDefault();
+let out=document.getElementById("out");out.textContent="Calculating...";
+try{let r=await fetch("/iifl/api/hedged-options/backtest",{method:"POST",body:new FormData(e.target)});
+out.textContent=JSON.stringify(await r.json(),null,2)}catch(ex){out.textContent=ex.message}}</script>
+</body></html>""")
+
+@bp.post("/iifl/api/hedged-options/backtest")
+def hedged_options_api():
+    file=request.files.get("file")
+    if not file or not file.filename.lower().endswith(".csv"):
+        return jsonify(status="error",message="Upload a historical options CSV"),400
+    try:
+        snapshots=_option_parse(file.read(15_000_001))
+        output=_option_run(snapshots,str(request.form.get("symbol","NIFTY")).upper(),
+                           float(request.form.get("capital","500000")),
+                           float(request.form.get("risk_pct","1")),
+                           float(request.form.get("fee","20")))
+        return jsonify(status="Ok",result=output)
+    except (ValueError,UnicodeDecodeError) as exc:
+        return jsonify(status="error",message=str(exc)),400
