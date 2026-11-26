@@ -306,6 +306,9 @@ def _option_run(snapshots,symbol,capital,risk_pct,fee):
     for i,key in enumerate(keys):
         ts=key[1];day,time=ts.split(" ")
         current=snapshots[key]
+        if position and day!=position["entry_ts"][:10]:
+            unpriced.append({**position,"status":"MISSED_EOD_NO_OVERNIGHT_CARRY"})
+            position=None
         if position and ts!=position["entry_ts"]:
             debit=_option_exit_debit(current["contracts"],position)
             if debit is None:
