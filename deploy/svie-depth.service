@@ -1,0 +1,15 @@
+[Unit]
+Description=SVIE SBC market-depth recorder (read-only, places no orders)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+WorkingDirectory=/root/iifl
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/root/iifl/venv/bin/python /root/iifl/svie_data.py record-depth --symbol SBC --instrument-id 6792 --every 5
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
