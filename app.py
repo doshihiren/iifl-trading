@@ -1242,6 +1242,10 @@ app.register_blueprint(swing_page.bp)
 import camarilla_page  # noqa: E402
 app.register_blueprint(camarilla_page.bp)
 
+# ---- SVIE backtest (SBC Volume Intelligence – backtest only, places no orders) ----
+import svie_page  # noqa: E402
+app.register_blueprint(svie_page.bp)
+
 
 if __name__ == "__main__":
 

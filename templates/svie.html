@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SVIE Backtest</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#121a2e;--text:#eef3ff;--muted:#91a0bd;--line:#263450;--blue:#6ea8fe;
+      --sA:#9aa7c0;--sB:#3987e5;--sC:#e08a2b;--good:#32d583;--bad:#ff6b6b}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(135deg,#08101f,#0f1730);font-family:Inter,system-ui,Arial,sans-serif;color:var(--text)}
+    .wrap{max-width:1440px;margin:auto;padding:24px 18px 60px}
+    .top{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap}
+    h1{font-size:26px;margin:0 0 4px}.sub{color:var(--muted);margin:0;font-size:14px}
+    .nav{display:flex;gap:14px;flex-wrap:wrap}.nav a{color:var(--blue);text-decoration:none;font-weight:700;font-size:14px}
+    .card{background:rgba(18,26,46,.95);border:1px solid var(--line);border-radius:18px;padding:18px 20px;margin-bottom:16px}
+    h2{font-size:17px;margin:0 0 14px}h3{font-size:14px;margin:14px 0 8px;color:#cfe0ff}
+    .step{display:inline-block;background:#24365e;color:#cfe0ff;border-radius:999px;width:24px;height:24px;text-align:center;line-height:24px;font-size:13px;margin-right:8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;align-items:end}
+    .f{display:flex;flex-direction:column;gap:6px;min-width:0}.f label{font-size:11px;color:var(--muted)}
+    .hint{font-size:11px;color:#b9d2ff;min-height:14px}
+    input,select{width:100%;background:#0d1528;color:var(--text);border:1px solid #30405f;border-radius:10px;padding:9px 11px;font-size:13px;outline:none;color-scheme:dark}
+    input[type=checkbox]{width:auto;accent-color:#6ea8fe}
+    input:focus{border-color:var(--blue)}
+    button{border:0;border-radius:10px;padding:10px 16px;font-weight:800;cursor:pointer;font-size:13px}
+    button:disabled{opacity:.5;cursor:wait}
+    .go{background:var(--good);color:#052718}.secondary{background:#202d49;color:var(--text)}.ghost{background:transparent;color:var(--blue);padding:6px 4px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px}
+    .groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}
+    .grp{background:#0d1528;border:1px solid var(--line);border-radius:14px;padding:14px;border-top:4px solid var(--c,#30405f)}
+    .grp .grid{grid-template-columns:1fr 1fr;gap:10px}
+    .grp .desc{font-size:12px;color:var(--muted);line-height:1.5;margin:-4px 0 10px}
+    table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+    th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+    th{color:var(--muted);font-weight:600;position:sticky;top:0;background:#121a2e}
+    td.num,th.num{text-align:right}.scroll{overflow:auto;max-height:480px}
+    .meta{color:var(--muted);font-size:12px}.pos{color:var(--good)}.neg{color:var(--bad)}.err{color:#ff9da4}.warn{color:#ffd98a}
+    .cmp td.best{background:rgba(50,213,131,.12);font-weight:700}
+    .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:6px}
+    .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+    .kv div{background:#0d1528;border:1px solid var(--line);border-radius:12px;padding:11px}.kv b{display:block;font-size:18px}.kv span{color:var(--muted);font-size:11px}
+    .chart{position:relative;width:100%}.chart svg{display:block;width:100%}
+    .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:0 0 8px}.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+    .tip{position:absolute;pointer-events:none;background:#0a1122;border:1px solid #33456b;border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.6;opacity:0;white-space:nowrap;z-index:5}
+    .seg{display:inline-flex;border:1px solid #30405f;border-radius:10px;overflow:hidden}.seg button{background:transparent;color:var(--muted);border-radius:0;padding:7px 12px;font-weight:600}.seg button.on{background:#24365e;color:#fff}
+    .verdict{font-size:14px;line-height:1.7;background:#0c1426;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+    .note{font-size:12px;color:#ffe2a8;background:#1d1a10;border:1px solid #5b4a1e;padding:10px 13px;border-radius:10px;line-height:1.6}
+    .bar{height:8px;background:#0d1528;border-radius:99px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;width:30%;background:var(--blue);animation:sl 1.2s infinite linear}
+    @keyframes sl{0%{margin-left:-30%}100%{margin-left:100%}}
+    .links a{color:var(--blue);font-size:13px;margin-right:16px;text-decoration:none;font-weight:700}
+    #results{display:none}.hide{display:none}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>📦 SVIE Backtest</h1><p class="sub">SBC Volume Intelligence Engine • Buy &amp; Hold vs RSI + VWAP vs Volume Intelligence on the same candles and capital</p></div>
+    <div class="nav"><a href="/iifl/strategy-lab">🧪 Strategy Lab</a><a href="/iifl/analysis">🔬 Analysis</a><a href="/iifl/reports">📊 Reports</a><a href="/iifl/">← Dashboard</a></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">1</span>Data from IIFL</h2>
+    <div class="grid">
+      <div class="f"><label>Symbol</label><input id="symbol" value="SBC"></div>
+      <div class="f"><label>IIFL instrumentId</label><input id="iid" value="6792"><div class="hint">SBC = 6792</div></div>
+      <div class="f"><label>Fetch from</label><input type="date" id="fFrom" value="2026-09-14"><div class="hint">Start ~2 weeks before the test (warm-up)</div></div>
+      <div class="f"><label>Fetch to</label><input type="date" id="fTo"></div>
+    </div>
+    <div class="row">
+      <button class="secondary" id="btnFetch" onclick="fetchData()">⬇ Fetch from IIFL</button>
+      <button class="ghost" onclick="loadStatus()">↻ Check stored data</button>
+      <span class="meta" id="fetchMsg"></span>
+    </div>
+    <div class="bar hide" id="fetchBar"><i></i></div>
+    <div class="kv" id="cov" style="margin-top:14px"></div>
+    <div class="hint" id="covWarn" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span>Settings <button class="ghost" style="font-size:12px" onclick="resetDefaults()">reset to defaults</button></h2>
+    <div class="groups" id="groups"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">3</span>Run</h2>
+    <div class="grid">
+      <div class="f"><label>Test from</label><input type="date" id="tFrom" value="2026-09-28"></div>
+      <div class="f"><label>Test to</label><input type="date" id="tTo"></div>
+      <div class="f"><label>Warm-up days before test</label><input type="number" id="warm" value="14" min="0" max="60"><div class="hint">Indicators only, no trading</div></div>
+      <div class="f"><label>&nbsp;</label><label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text)"><input type="checkbox" id="sweep"> Parameter sweep (train 70% / test 30%)</label><div class="hint">Takes ~10–30 s longer</div></div>
+    </div>
+    <div class="row">
+      <button class="go" id="btnRun" onclick="runTest()">▶ Run backtest</button>
+      <span class="meta" id="runMsg"></span>
+    </div>
+    <div class="bar hide" id="runBar"><i></i></div>
+  </div>
+
+  <div id="results">
+    <div class="card">
+      <h2>Results <span class="meta" id="resMeta"></span></h2>
+      <div class="verdict" id="verdict"></div>
+      <div class="note" id="limits"></div>
+      <h3>Comparison</h3>
+      <div style="overflow-x:auto"><table class="cmp" id="cmp"></table></div>
+      <div class="links" id="files" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h2>Equity curve <span class="meta">(₹ total account value, marked to market every minute)</span></h2>
+      <div class="legend" id="legend"></div>
+      <div class="chart" id="chart"><div class="tip" id="tip"></div></div>
+    </div>
+
+    <div class="card">
+      <h2>Trades <span class="seg" id="tradeTabs"></span></h2>
+      <h3>Where the money went – by final exit reason</h3>
+      <div class="scroll" style="max-height:260px"><table id="exits"></table></div>
+      <h3>Trade list <span class="meta" id="tradeNote"></span></h3>
+      <div class="scroll"><table id="trades"></table></div>
+    </div>
+
+    <div class="card hide" id="sweepCard">
+      <h2>Parameter sweep <span class="meta" id="sweepMeta"></span></h2>
+      <div id="sweepBody"></div>
+      <div class="meta" style="margin-top:8px">Settings are ranked on the train period only. Trust one only if the <b>test</b> column (data it never saw) is also good.</div>
+    </div>
+
+    <div class="card">
+      <h2>Risk events &amp; inventory</h2>
+      <div class="scroll" style="max-height:300px"><table id="inv"></table></div>
+      <ul class="meta" id="events" style="line-height:1.8"></ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const C = {A: 'var(--sA)', B: 'var(--sB)', C: 'var(--sC)'};
+const HEX = {A: '#9aa7c0', B: '#3987e5', C: '#e08a2b'};
+const GROUPS = [
+  {t: 'Capital & execution', c: '#6ea8fe', d: 'Same for all three strategies.', f: [
+    ['capital', 'Start capital ₹'], ['base_order', 'Base order ₹'], ['intraday_cap', 'Intraday limit ₹ (B, C)'],
+    ['positional_cap', 'Positional limit ₹ (C)'], ['participation_pct', 'Max % of candle volume'], ['slippage_pct', 'Slippage % per fill'],
+    ['brokerage_per_order', 'Brokerage ₹ per order'], ['tick', 'Tick size ₹']]},
+  {t: 'Risk limits', c: '#ff6b6b', d: 'Operational limits – far inside the ₹10 L absolute boundary.', f: [
+    ['daily_loss_limit', 'Daily loss limit ₹'], ['weekly_loss_limit', 'Weekly loss limit ₹'], ['max_drawdown_kill', 'Kill switch drawdown ₹'],
+    ['absolute_loss_limit', 'Absolute loss boundary ₹'], ['max_entries_per_day', 'Max entries / day'], ['cooldown_bars', 'Cool-down (minutes)'],
+    ['last_entry', 'No entries after (HH:MM)'], ['squareoff', 'Square-off (HH:MM)']]},
+  {t: 'Intraday exits (B & C)', c: '#32d583', d: '25% sells at +1, +2, +3 steps; the last 25% trails.', f: [
+    ['step_pct', 'Ladder step %'], ['trail_pct', 'Trailing %'], ['hard_stop_pct', 'Hard stop %'], ['entry_life_bars', 'Entry order life (min)'],
+    ['entry_chase_pct', 'Max chase above signal %']]},
+  {t: 'B · RSI + VWAP', c: '#3987e5', d: 'Buy: RSI7 crosses up through level, RSI14 > 50, price > VWAP.', f: [
+    ['b_rsi_cross', 'RSI7 cross level'], ['b_rsi_exit', 'Exit if RSI7 below']]},
+  {t: 'C · Volume Intelligence (intraday)', c: '#e08a2b', d: 'Entry gate + score ≥ min. Size: 80+ = 100%, 65+ = 75%, 50+ = 40% of base.', f: [
+    ['min_score', 'Min score'], ['gate_buy_ratio', 'Buy ratio above %'], ['gate_rvol', 'Relative volume above x'],
+    ['exit_buy_ratio', 'Exit: buy ratio below %'], ['neg_delta_bars', 'Exit: negative delta bars'], ['vwap_exit_buffer_pct', 'Exit: below VWAP by %'],
+    ['exit_votes', 'Exit when N conditions agree'], ['neg_score_exit', 'Exit: sell score ≥'], ['flow_window', 'Flow window (min)'], ['rvol_days', 'RVOL history (days)']]},
+  {t: 'C · Positional accumulation', c: '#c98500', d: 'Buys only on weakness + stabilisation + weakening selling + absorption. Never averages down automatically.', f: [
+    ['pos_tranche', 'Tranche ₹'], ['pos_weak_pct', 'Below N-day high by %'], ['pos_lookback_days', 'N-day high lookback'],
+    ['pos_window', 'Stabilisation window (min)'], ['pos_min_gap_days', 'Min days between tranches'], ['pos_target', 'Sell target ₹ (hypothesis)']]},
+];
+let DEF = {}, RES = null, TAB = 'C';
+const $ = id => document.getElementById(id);
+const rs = v => (v < 0 ? '-₹' : '₹') + Math.abs(Math.round(v)).toLocaleString('en-IN');
+const cls = v => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function recall(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+
+async function api(url, body) {
+  const r = await fetch(url, body ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)} : {});
+  const j = await r.json().catch(() => ({status: 'error', message: 'Bad reply (HTTP ' + r.status + ')'}));
+  if (j.status !== 'Ok') throw new Error(j.message || ('HTTP ' + r.status));
+  return j.result;
+}
+async function poll(job, msgEl) {
+  while (true) {
+    await new Promise(r => setTimeout(r, 1200));
+    const j = await api('/iifl/api/svie/jobs/' + job);
+    msgEl.textContent = j.stage || '';
+    if (j.status === 'done') return j.result;
+    if (j.status === 'error') throw new Error(j.error);
+  }
+}
+
+function buildSettings() {
+  const saved = recall('svie_params') || {};
+  $('groups').innerHTML = GROUPS.map(g => `<div class="grp" style="--c:${g.c}"><h3 style="margin:0 0 8px">${g.t}</h3><div class="desc">${g.d}</div><div class="grid">` +
+    g.f.map(([k, l]) => `<div class="f"><label>${l}</label><input id="p_${k}" data-k="${k}" ${typeof DEF[k] === 'string' ? '' : 'type="number" step="any"'} value="${esc(saved[k] ?? DEF[k])}"></div>`).join('') +
+    '</div></div>').join('');
+}
+function params() {
+  const p = {};
+  document.querySelectorAll('[data-k]').forEach(el => { p[el.dataset.k] = el.value; });
+  store('svie_params', p);
+  return p;
+}
+function resetDefaults() { store('svie_params', {}); buildSettings(); }
+
+function showCoverage(c) {
+  $('cov').innerHTML = `<div><span>Candles stored</span><b>${c.candles.toLocaleString('en-IN')}</b></div>
+    <div><span>Trading days with data</span><b>${c.days_with_data} / ${c.trading_days_expected}</b></div>
+    <div><span>First candle</span><b style="font-size:14px">${c.first || '–'}</b></div>
+    <div><span>Last candle</span><b style="font-size:14px">${c.last || '–'}</b></div>
+    <div><span>Zero-volume bars</span><b>${c.zero_volume_bars}</b></div>` + ($('cov').dataset.depth || '');
+  const short = Object.keys(c.short_days || {}).length;
+  $('covWarn').innerHTML = (c.missing_days.length ? `<span class="warn">Missing days: ${c.missing_days.join(', ')} – fetch again.</span> ` : '<span class="pos">No missing trading days.</span> ') +
+    (short ? `<span class="meta">${short} day(s) have fewer minutes (minutes with no trades – normal).</span>` : '');
+}
+async function loadStatus() {
+  try {
+    const r = await api(`/iifl/api/svie/status?iid=${encodeURIComponent($('iid').value)}&from=${$('fFrom').value}&to=${$('fTo').value}`);
+    if (!Object.keys(DEF).length) { DEF = r.defaults; buildSettings(); }
+    $('cov').dataset.depth = `<div><span>Depth snapshots recorded</span><b>${r.depth.rows.toLocaleString('en-IN')}</b><span>${r.depth.today ? r.depth.today + ' today' : 'recorder not running today'}</span></div>`;
+    showCoverage(r.coverage);
+  } catch (e) { $('covWarn').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+async function fetchData() {
+  const btn = $('btnFetch'); btn.disabled = true; $('fetchBar').classList.remove('hide'); $('fetchMsg').className = 'meta';
+  try {
+    const j = await api('/iifl/api/svie/fetch', {symbol: $('symbol').value, iid: $('iid').value, from: $('fFrom').value, to: $('fTo').value});
+    const r = await poll(j.job, $('fetchMsg'));
+    $('fetchMsg').textContent = `Stored ${r.fetch.stored.toLocaleString('en-IN')} candles over ${r.fetch.days} trading days` +
+      (r.fetch.failed_days.length ? ` · FAILED: ${r.fetch.failed_days.join(', ')}` : '');
+    showCoverage(r.coverage);
+  } catch (e) { $('fetchMsg').className = 'err'; $('fetchMsg').textContent = e.message; }
+  btn.disabled = false; $('fetchBar').classList.add('hide');
+}
+
+async function runTest() {
+  const btn = $('btnRun'); btn.disabled = true; $('runBar').classList.remove('hide'); $('runMsg').className = 'meta';
+  try {
+    const j = await api('/iifl/api/svie/run', {symbol: $('symbol').value, iid: $('iid').value, from: $('tFrom').value, to: $('tTo').value,
+      warmup_days: $('warm').value, sweep: $('sweep').checked, params: params()});
+    RES = await poll(j.job, $('runMsg'));
+    $('runMsg').textContent = 'Done.';
+    render();
+  } catch (e) { $('runMsg').className = 'err'; $('runMsg').textContent = e.message; }
+  btn.disabled = false; $('runBar').classList.add('hide');
+}
+
+const ROWS = [
+  ['Gross profit', 'gross_profit', 'r', 1], ['Net profit (after charges, MTM)', 'net_profit', 'r', 1],
+  ['Net if liquidated at last close', 'net_if_liquidated', 'r', 1], ['Charges paid', 'charges_total', 'r', -1],
+  ['Max drawdown', 'max_drawdown', 'r', -1], ['Max drawdown %', 'max_drawdown_pct', '%', -1],
+  ['Winning trades %', 'win_pct', '%', 1], ['Number of trades', 'trades', 'n', 0], ['Avg holding (min)', 'avg_hold_min', 'n', 0],
+  ['Capital utilisation %', 'capital_utilisation_pct', '%', 0], ['Max exposure', 'max_exposure', 'r', 0],
+  ['Positional inventory (shares)', 'positional_qty_end', 'n', 0], ['Entries not filled (liquidity)', 'unfilled_entries', 'n', 0],
+  ['Forced 15:29 exits', 'forced_eod_exits', 'n', 0], ['Drawdown reached kill-switch level', 'kill_switch', 'b', 0]];
+function fmt(v, t) {
+  if (t === 'b') return v ? '<span class="warn">YES</span>' : 'no';
+  if (t === 'r') return `<span class="${cls(v)}">${rs(v)}</span>`;
+  if (t === '%') return v.toFixed(2) + '%';
+  return Number(v).toLocaleString('en-IN');
+}
+function render() {
+  $('results').style.display = 'block';
+  const m = RES.meta, S = RES.strategies, keys = Object.keys(S);
+  $('resMeta').textContent = `· ${m.symbol} ${m.from} → ${m.to} · ${m.candles.toLocaleString('en-IN')} candles (+${m.warmup_candles.toLocaleString('en-IN')} warm-up)`;
+  $('limits').innerHTML = '<b>Data limits:</b> ' + esc(RES.limits_note);
+  $('cmp').innerHTML = '<tr><th>Metric</th>' + keys.map(k => `<th class="num"><span class="dot" style="--c:${C[k]}"></span>${S[k].name}</th>`).join('') + '</tr>' +
+    ROWS.map(([l, key, t, dir]) => {
+      const vals = keys.map(k => S[k].metrics[key]);
+      const best = dir ? (dir > 0 ? Math.max(...vals) : Math.min(...vals)) : null;
+      return `<tr><td>${l}</td>` + keys.map((k, i) => `<td class="num ${dir && vals[i] === best && new Set(vals).size > 1 ? 'best' : ''}">${fmt(vals[i], t)}</td>`).join('') + '</tr>';
+    }).join('');
+  $('files').innerHTML = `<a href="/iifl/api/svie/files/${RES.files.report}" target="_blank">📄 Full report</a>` +
+    keys.map(k => `<a href="/iifl/api/svie/files/${RES.files[k + '_trades']}">⬇ ${k} trades CSV</a>`).join('') +
+    `<a href="/iifl/api/svie/files/${RES.files.summary}">⬇ summary JSON</a>`;
+
+  // verdict
+  const net = k => S[k].metrics.net_if_liquidated;
+  const lines = keys.map(k => `<span class="dot" style="--c:${C[k]}"></span><b>${S[k].name}</b>: <span class="${cls(net(k))}">${rs(net(k))}</span> net, max drawdown ${rs(S[k].metrics.max_drawdown)}` +
+    (k !== 'A' ? ` · gross before charges <span class="${cls(S[k].metrics.gross_profit)}">${rs(S[k].metrics.gross_profit)}</span>` : ''));
+  let v = lines.join('<br>');
+  const active = keys.filter(k => k !== 'A');
+  if (active.every(k => S[k].metrics.gross_profit <= 0)) v += '<br><span class="warn">Neither active strategy made money even before charges – the signals show no edge in this period.</span>';
+  else if (active.every(k => net(k) <= 0)) v += '<br><span class="warn">The active strategies lose after charges – the edge (if any) is smaller than the costs.</span>';
+  if (RES.sweep) {
+    const anyTest = Object.values(RES.sweep.results).some(r => r.top.some(t => t.test_net > 0));
+    v += anyTest ? '<br>Sweep: some settings made money on the unseen test period – check them below before trusting.' :
+      '<br><span class="warn">Sweep: no setting made money on the unseen test period.</span>';
+  }
+  $('verdict').innerHTML = v;
+
+  drawChart();
+  $('tradeTabs').innerHTML = keys.filter(k => k !== 'A').map(k => `<button class="${k === TAB ? 'on' : ''}" onclick="TAB='${k}';render()">${S[k].name}</button>`).join('');
+  renderTrades();
+  renderSweep();
+  // inventory + events
+  const inv = keys.flatMap(k => S[k].metrics.positional_inventory.map(x => ({...x, s: S[k].name})));
+  $('inv').innerHTML = '<tr><th>Strategy</th><th>Sleeve</th><th class="num">Qty</th><th class="num">Avg buy</th><th>Since</th><th class="num">MTM</th></tr>' +
+    (inv.length ? inv.map(x => `<tr><td>${x.s}</td><td>${x.sleeve}</td><td class="num">${x.qty.toLocaleString('en-IN')}</td><td class="num">₹${x.avg_buy}</td><td>${x.since}</td><td class="num ${cls(x.mtm)}">${rs(x.mtm)}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="meta">No holdings at the end</td></tr>');
+  const ev = keys.flatMap(k => S[k].events.map(e => `<li><b>${S[k].name}</b> · ${esc(e)}</li>`));
+  $('events').innerHTML = ev.length ? ev.slice(0, 120).join('') : '<li>No risk limits were hit.</li>';
+}
+
+function renderTrades() {
+  const s = RES.strategies[TAB]; if (!s) return;
+  $('exits').innerHTML = '<tr><th>Final exit</th><th class="num">Trades</th><th class="num">Winners</th><th class="num">Net ₹</th><th class="num">Avg / trade</th></tr>' +
+    (s.exits.length ? s.exits.map(g => `<tr><td>${esc(g.reason)}</td><td class="num">${g.trades}</td><td class="num">${g.wins}</td><td class="num ${cls(g.net)}">${rs(g.net)}</td><td class="num ${cls(g.net)}">${rs(g.net / g.trades)}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="meta">No closed trades</td></tr>');
+  $('tradeNote').textContent = s.trades_total > s.trades.length ? `(last ${s.trades.length} of ${s.trades_total} – full list in the CSV)` : `(${s.trades_total})`;
+  $('trades').innerHTML = '<tr><th>Sleeve</th><th>Entry</th><th>Exit</th><th class="num">Qty</th><th class="num">Avg buy</th><th class="num">Avg sell</th><th class="num">Gross</th><th class="num">Charges</th><th class="num">Net</th><th class="num">Min</th><th>Exits</th><th class="num">Score</th></tr>' +
+    s.trades.slice().reverse().map(t => `<tr><td>${t.sleeve}</td><td>${t.entry_ts}</td><td>${t.exit_ts}</td><td class="num">${t.qty.toLocaleString('en-IN')}</td><td class="num">${t.avg_buy.toFixed(2)}</td><td class="num">${t.avg_sell.toFixed(2)}</td><td class="num ${cls(t.gross)}">${rs(t.gross)}</td><td class="num">${rs(t.charges)}</td><td class="num ${cls(t.net)}">${rs(t.net)}</td><td class="num">${t.hold_min}</td><td class="meta">${esc(t.exit)}</td><td class="num">${t.score ?? ''}</td></tr>`).join('');
+}
+
+function renderSweep() {
+  const sw = RES.sweep; $('sweepCard').classList.toggle('hide', !sw); if (!sw) return;
+  $('sweepMeta').textContent = `· train ${sw.train} · test ${sw.test}`;
+  $('sweepBody').innerHTML = Object.entries(sw.results).map(([k, r]) => `<h3><span class="dot" style="--c:${C[k]}"></span>${RES.strategies[k].name} – ${r.combos} combinations, top 3 on train</h3>
+    <div class="scroll"><table><tr><th>Settings</th><th class="num">Train net</th><th class="num">Train DD</th><th class="num">Test net</th><th class="num">Test DD</th><th class="num">Test trades</th></tr>` +
+    r.top.map(t => `<tr><td class="meta">${esc(Object.entries(t.params).map(([a, b]) => a + '=' + b).join(', '))}</td><td class="num ${cls(t.train_net)}">${rs(t.train_net)}</td><td class="num">${rs(t.train_dd)}</td><td class="num ${cls(t.test_net)}"><b>${rs(t.test_net)}</b></td><td class="num">${rs(t.test_dd)}</td><td class="num">${t.test_trades}</td></tr>`).join('') + '</table></div>').join('');
+}
+
+function drawChart() {
+  const S = RES.strategies, keys = Object.keys(S), W = 1200, H = 320, P = {l: 70, r: 14, t: 10, b: 26};
+  const series = keys.map(k => ({k, pts: S[k].equity}));
+  const all = series.flatMap(s => s.pts.map(p => p[1]));
+  let lo = Math.min(...all), hi = Math.max(...all); if (hi === lo) hi = lo + 1;
+  const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
+  const x = (j, n) => P.l + j / Math.max(n - 1, 1) * (W - P.l - P.r), y = v => P.t + (hi - v) / (hi - lo) * (H - P.t - P.b);
+  let g = '';
+  for (let i = 0; i <= 4; i++) { const v = lo + (hi - lo) * i / 4; g += `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="#1d2842"/><text x="${P.l - 8}" y="${y(v) + 4}" fill="#91a0bd" font-size="11" text-anchor="end">${(v / 1e5).toFixed(1)} L</text>`; }
+  const cap = RES.meta.capital; g += `<line x1="${P.l}" x2="${W - P.r}" y1="${y(cap)}" y2="${y(cap)}" stroke="#5b6a88" stroke-dasharray="4 4"/>`;
+  const ref = series[0].pts; [0, .25, .5, .75, 1].forEach(f => { const j = Math.round(f * (ref.length - 1)); g += `<text x="${x(j, ref.length)}" y="${H - 6}" fill="#91a0bd" font-size="11" text-anchor="middle">${ref[j][0].slice(5, 10)}</text>`; });
+  const lines = series.map(s => `<polyline fill="none" stroke="${HEX[s.k]}" stroke-width="${s.k === 'A' ? 1.4 : 2}" points="${s.pts.map((p, j) => x(j, s.pts.length).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(' ')}"/>`).join('');
+  $('chart').innerHTML = `<div class="tip" id="tip"></div><svg viewBox="0 0 ${W} ${H}">${g}${lines}<line id="cur" y1="${P.t}" y2="${H - P.b}" stroke="#6ea8fe" opacity="0"/><rect x="${P.l}" y="0" width="${W - P.l - P.r}" height="${H}" fill="transparent" id="hit"/></svg>`;
+  $('legend').innerHTML = keys.map(k => `<span><i style="background:${HEX[k]}"></i>${S[k].name}</span>`).join('') + '<span><i style="background:#5b6a88"></i>start capital</span>';
+  const svg = $('chart').querySelector('svg'), tip = $('tip'), cur = $('cur');
+  $('hit').addEventListener('mousemove', ev => {
+    const b = svg.getBoundingClientRect(), fx = (ev.clientX - b.left) / b.width * W;
+    const f = Math.min(1, Math.max(0, (fx - P.l) / (W - P.l - P.r)));
+    cur.setAttribute('x1', fx); cur.setAttribute('x2', fx); cur.setAttribute('opacity', .5);
+    tip.innerHTML = `<b>${series[0].pts[Math.round(f * (series[0].pts.length - 1))][0]}</b><br>` +
+      series.map(s => { const p = s.pts[Math.round(f * (s.pts.length - 1))]; return `<span style="color:${HEX[s.k]}">●</span> ${S[s.k].name}: ${rs(p[1])} <span class="${cls(p[1] - cap)}">(${rs(p[1] - cap)})</span>`; }).join('<br>');
+    tip.style.opacity = 1; const px = ev.clientX - b.left; tip.style.left = (px > b.width * .6 ? px - tip.offsetWidth - 12 : px + 12) + 'px'; tip.style.top = '10px';
+  });
+  $('hit').addEventListener('mouseleave', () => { tip.style.opacity = 0; cur.setAttribute('opacity', 0); });
+}
+
+(function init() {
+  const d = new Date(); d.setDate(d.getDate() - 1); while ([0, 6].includes(d.getDay())) d.setDate(d.getDate() - 1);
+  const y = d.toISOString().slice(0, 10); $('fTo').value = y; $('tTo').value = y;
+  loadStatus();
+})();
+</script>
+</body>
+</html>

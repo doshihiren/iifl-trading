@@ -426,7 +426,8 @@ class Sim:
             "qty": lot.qty, "avg_buy": round(lot.buy_value / lot.qty, 4),
             "avg_sell": round(lot.sell_value / lot.qty, 4), "gross": round(gross, 2),
             "charges": round(lot.charges, 2), "net": round(net, 2),
-            "hold_min": int((t1 - t0).total_seconds() // 60), "exit": "+".join(lot.reasons),
+            "hold_min": int((t1 - t0).total_seconds() // 60), "exit": " > ".join(lot.reasons),
+            "last_exit": lot.reasons[-1] if lot.reasons else "?",
             "score": lot.score,
         })
 
@@ -731,6 +732,18 @@ def metrics(sim, pr, p, a, b):
     }
 
 
+def exit_breakdown(trades):
+    """Group closed trades by their final exit reason: how often, and what it earned."""
+    out = {}
+    for t in trades:
+        r = t.get("last_exit") or "?"
+        g = out.setdefault(r, {"reason": r, "trades": 0, "net": 0.0, "wins": 0})
+        g["trades"] += 1
+        g["net"] += t["net"]
+        g["wins"] += t["net"] > 0
+    return sorted(({**g, "net": round(g["net"], 2)} for g in out.values()), key=lambda g: g["net"])
+
+
 def run_all(candles, p, d_from, d_to, strategies="ABC"):
     pr = Prepared(candles, p)
     a, b = index_range(pr, d_from, d_to)
@@ -752,7 +765,7 @@ SWEEP = {
 }
 
 
-def sweep(candles, p, d_from, d_to, train_frac=0.7):
+def sweep(candles, p, d_from, d_to, train_frac=0.7, progress=None):
     pr = Prepared(candles, p)
     a, b = index_range(pr, d_from, d_to)
     days = sorted({pr.day[i] for i in range(a, b)})
@@ -765,7 +778,9 @@ def sweep(candles, p, d_from, d_to, train_frac=0.7):
         for k in keys:
             combos = [dict(c, **{k: v}) for c in combos for v in grid[k]]
         rows = []
-        for c in combos:
+        for n, c in enumerate(combos, 1):
+            if progress:
+                progress(f"Sweep {NAMES[s]}: {n}/{len(combos)}")
             pp = dict(p, **c)
             _, mt = simulate(pr, s, pp, a, a2)
             score = mt["net_if_liquidated"] - 0.5 * mt["max_drawdown"]
@@ -845,7 +860,7 @@ def write_outputs(res, out_dir, meta, sweep_report=None):
     for k, v in res.items():
         with open(f"{base}_{k}_trades.csv", "w", newline="") as f:
             cols = ["id", "sleeve", "entry_ts", "exit_ts", "qty", "avg_buy", "avg_sell", "gross", "charges",
-                    "net", "hold_min", "exit", "score"]
+                    "net", "hold_min", "exit", "last_exit", "score"]
             w = csv.DictWriter(f, fieldnames=cols)
             w.writeheader()
             w.writerows(v["trades"])

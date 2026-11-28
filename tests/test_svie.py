@@ -239,3 +239,71 @@ class TestExclusiveToDate(unittest.TestCase):
         self.assertEqual(seen["to"], "17-Oct-2026")
         self.assertEqual([c["ts"][:10] for c in out][-1], "2026-10-16")
         self.assertEqual(len(out), 5)
+
+
+class TestPage(unittest.TestCase):
+    """The /iifl/svie page and its API, end to end on synthetic candles."""
+
+    @classmethod
+    def setUpClass(cls):
+        import time as _t
+        import app as webapp
+        import candles
+        import db
+        cls.t = _t
+        candles.store("6792", synth(days=12, start=date(2026, 9, 14)))
+        cls.client = webapp.app.test_client()
+        with cls.client.session_transaction() as s:
+            s["dashboard_authenticated"] = True
+
+    def wait(self, job):
+        for _ in range(200):
+            r = self.client.get(f"/iifl/api/svie/jobs/{job}").get_json()["result"]
+            if r["status"] != "running":
+                return r
+            self.t.sleep(0.1)
+        self.fail("job did not finish")
+
+    def test_page_and_status(self):
+        self.assertEqual(self.client.get("/iifl/svie").status_code, 200)
+        r = self.client.get("/iifl/api/svie/status?iid=6792&from=2026-09-14&to=2026-09-30").get_json()
+        self.assertEqual(r["status"], "Ok")
+        self.assertGreater(r["result"]["coverage"]["candles"], 1000)
+        self.assertIn("step_pct", r["result"]["defaults"])
+
+    def test_run_and_download(self):
+        r = self.client.post("/iifl/api/svie/run", json={"iid": "6792", "from": "2026-09-21", "to": "2026-09-30",
+                                                          "params": {"step_pct": "0.8", "squareoff": "15:05"}}).get_json()
+        res = self.wait(r["result"]["job"])
+        self.assertEqual(res["status"], "done", res.get("error"))
+        out = res["result"]
+        self.assertEqual(set(out["strategies"]), {"A", "B", "C"})
+        self.assertEqual(out["meta"]["params"]["step_pct"], 0.8)
+        f = self.client.get("/iifl/api/svie/files/" + out["files"]["report"])
+        self.assertEqual(f.status_code, 200)
+        self.assertEqual(self.client.get("/iifl/api/svie/files/..%2Fiifl.db").status_code, 404)
+
+    def test_bad_params_rejected(self):
+        for body in ({"iid": "x", "from": "2026-09-21", "to": "2026-09-30"},
+                     {"iid": "6792", "from": "2026-09-21", "to": "2026-09-30", "params": {"capital": "100"}},
+                     {"iid": "6792", "from": "bad", "to": "2026-09-30"}):
+            self.assertEqual(self.client.post("/iifl/api/svie/run", json=body).status_code, 400)
+
+    def test_fetch_job(self):
+        import market_data
+
+        def fake(iid, *, exchange, timeframe, from_date, to_date):
+            return 200, {"status": "Ok", "result": [["2026-10-05T09:15:00+05:30", 60, 61, 59, 60.5, 1000]]}
+        old = market_data.historical_candles
+        market_data.historical_candles = fake
+        try:
+            r = self.client.post("/iifl/api/svie/fetch", json={"iid": "6792", "from": "2026-10-05", "to": "2026-10-06"}).get_json()
+            res = self.wait(r["result"]["job"])
+        finally:
+            market_data.historical_candles = old
+        self.assertEqual(res["status"], "done", res.get("error"))
+        self.assertGreaterEqual(res["result"]["fetch"]["stored"], 1)
+
+    def test_needs_login(self):
+        import app as webapp
+        self.assertEqual(webapp.app.test_client().get("/iifl/api/svie/status").status_code, 401)

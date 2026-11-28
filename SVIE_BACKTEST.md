@@ -74,3 +74,11 @@ Snapshots go to the `quote_snapshots` table (raw reply kept too).
   are charged (rates in `lab_backtest.py` – compare with one IIFL contract note).
 * Two months of one stock is a short sample. Trust only settings that also hold on
   the sweep's unseen test period, then paper-trade before any live money.
+
+## 5. Web page
+
+Dashboard → **📦 SVIE Backtest** (`/iifl/svie`). Same engine as the command line:
+fetch candles from IIFL, check coverage, edit every setting, run A/B/C (+ sweep),
+see the comparison, equity curve, exit-reason breakdown, trades, inventory and
+risk events, and download the report/CSVs. It is backtest-only – it never places orders.
+Settings you type are remembered in your browser.
