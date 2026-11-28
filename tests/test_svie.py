@@ -9,7 +9,7 @@ import random
 import sys
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -115,6 +115,15 @@ class TestBacktest(unittest.TestCase):
             m = self.res[s]["metrics"]
             self.assertAlmostEqual(m["net_profit"], m["gross_profit"] - m["charges_total"], delta=1.0, msg=s)
 
+    def test_brokerage_once_per_order(self):
+        p = dict(self.p, brokerage_per_order=1000.0)
+        sim = sb.Sim(self.pr, "A", p, self.a, self.b)
+        for i in range(self.a, self.b):
+            sim.bar(i)
+        buys = [f for f in sim.fill_log if f[1] == "BUY"]
+        self.assertGreater(len(buys), 1)                 # ₹20 L fills in many parts…
+        self.assertLess(sim.lots[0].charges, 1000 + 0.002 * sim.lots[0].buy_value)  # …one brokerage
+
     def test_charges_always_paid(self):
         for s in "BC":
             for t in self.res[s]["trades"]:
@@ -202,3 +211,31 @@ class TestData(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestExclusiveToDate(unittest.TestCase):
+    def test_last_day_of_request_is_kept(self):
+        """IIFL's toDate is exclusive: iifl_fetch must ask for d_to + 1 and drop extras."""
+        import candles
+        import market_data
+        seen = {}
+
+        def fake(iid, *, exchange, timeframe, from_date, to_date):
+            seen["to"] = to_date
+            d0 = datetime.strptime(from_date, "%d-%b-%Y").date()
+            d1 = datetime.strptime(to_date, "%d-%b-%Y").date()
+            rows, d = [], d0
+            while d < d1:                                    # exclusive, like IIFL
+                rows.append([f"{d.isoformat()}T09:15:00+05:30", 10, 10, 10, 10, 5])
+                d += timedelta(days=1)
+            rows.append([f"{(d1 + timedelta(days=2)).isoformat()}T09:15:00+05:30", 1, 1, 1, 1, 1])
+            return 200, {"status": "Ok", "result": rows}
+        old = market_data.historical_candles
+        market_data.historical_candles = fake
+        try:
+            out = candles.iifl_fetch("6792", "NSEEQ", date(2026, 10, 12), date(2026, 10, 16))
+        finally:
+            market_data.historical_candles = old
+        self.assertEqual(seen["to"], "17-Oct-2026")
+        self.assertEqual([c["ts"][:10] for c in out][-1], "2026-10-16")
+        self.assertEqual(len(out), 5)

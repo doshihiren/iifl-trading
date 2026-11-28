@@ -139,14 +139,17 @@ def iifl_fetch(instrument_id, exchange, d_from, d_to):
     """One historical request (inclusive dates). Returns parsed candles."""
     import broker
     import market_data
+    # IIFL treats toDate as EXCLUSIVE (the last day of every request came back
+    # empty), so ask for one day more and drop anything after d_to.
     status, body = market_data.historical_candles(
         instrument_id, exchange=exchange, timeframe="1m",
-        from_date=d_from.strftime("%d-%b-%Y"), to_date=d_to.strftime("%d-%b-%Y"))
+        from_date=d_from.strftime("%d-%b-%Y"), to_date=(d_to + timedelta(days=1)).strftime("%d-%b-%Y"))
     if broker.is_session_error(status, body):
         raise broker.SessionExpired(broker.message_of(body) or f"HTTP {status}")
     if status != 200:
         raise CandleFetchError(f"HTTP {status}: {broker.message_of(body) or str(body)[:200]}")
-    return parse_candles(body)
+    last = d_to.isoformat()
+    return [c for c in parse_candles(body) if d_from.isoformat() <= c["ts"][:10] <= last]
 
 
 def trading_days(d_from, d_to):

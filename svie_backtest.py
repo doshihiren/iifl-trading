@@ -59,7 +59,7 @@ DEFAULTS = {
     "participation_pct": 10.0,       # max % of a candle's volume we may take
     "slippage_pct": 0.05,            # per fill, against us
     "tick": 0.01,
-    "brokerage_per_order": 20.0,     # ₹ per executed fill – set to your IIFL plan
+    "brokerage_per_order": 20.0,     # ₹ per executed ORDER (charged once, even if it fills in parts)
     "last_entry": "15:00",
     "squareoff": "15:10",
     "entry_life_bars": 3,
@@ -301,6 +301,7 @@ class Sim:
         self.unfilled_entries = 0
         self.fills = 0
         self.fill_log = []          # (bar index, side, qty, price) – used by tests
+        self.charged = set()        # orders that already paid brokerage
 
     # ---------------------------------------------------------------- utils
     def _tick_up(self, x):
@@ -327,13 +328,15 @@ class Sim:
         if qty <= 0:
             return 0
         value = qty * px
-        ch = leg_charges(value, "BUY", o["product"], self.p["brokerage_per_order"])
+        brk = 0.0 if o.get("charged") else self.p["brokerage_per_order"]
+        ch = leg_charges(value, "BUY", o["product"], brk)
         if value + ch > self.cash:
-            qty = int((self.cash - self.p["brokerage_per_order"] - 50) // (px * 1.002))
+            qty = int((self.cash - brk - 50) // (px * 1.002))
             if qty <= 0:
                 return 0
             value = qty * px
-            ch = leg_charges(value, "BUY", o["product"], self.p["brokerage_per_order"])
+            ch = leg_charges(value, "BUY", o["product"], brk)
+        o["charged"] = True
         self.cash -= value + ch
         self.fills += 1
         self.fill_log.append((i, "BUY", qty, px))
@@ -383,12 +386,17 @@ class Sim:
         else:
             lot.stop, lot.targets = None, []
 
-    def _sell(self, i, lot, qty, px, reason):
+    def _sell(self, i, lot, qty, px, reason, order="EXIT"):
+        """order: which broker order this fill belongs to – each target level is its own
+        limit order; stop / signal / squareoff exits share one exit order per lot."""
         if qty <= 0:
             return 0
         qty = min(qty, lot.open_qty)
         value = qty * px
-        ch = leg_charges(value, "SELL", lot.product, self.p["brokerage_per_order"])
+        key = (lot.id, order)
+        brk = 0.0 if key in self.charged else self.p["brokerage_per_order"]
+        self.charged.add(key)
+        ch = leg_charges(value, "SELL", lot.product, brk)
         self.cash += value - ch
         self.fills += 1
         self.fill_log.append((i, "SELL", qty, px))
@@ -497,7 +505,7 @@ class Sim:
                 if t[1] > 0 and k["high"] >= t[0] and cap > 0 and lot in self.lots:
                     px = max(t[0], k["open"]) if k["open"] > t[0] else t[0]
                     q = min(t[1], cap, lot.open_qty)
-                    got = self._sell(i, lot, q, px, "TARGET")
+                    got = self._sell(i, lot, q, px, "TARGET", order=("T", t[0]))
                     t[1] -= got
                     cap -= got
                     if lot.sleeve == "INTRA":
